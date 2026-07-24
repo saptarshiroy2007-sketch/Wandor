@@ -3,65 +3,93 @@
 MVP for solo teachers / 2-3 person coaching centres: scheduling + notifications,
 fee tracking, and two test modes (auto-MCQ, locked-document).
 
-## Structure
+## Architecture
+
+**One React web app, wrapped by Capacitor for Android.** Not two separate apps.
+The scheduling/payments/test-taking UI is 100% shared code — write it once, it
+runs in a browser tab AND as the installed Android app. The only native code is
+a single small plugin for the one thing that genuinely requires OS-level access:
+the locked-test anti-cheat feature.
 
 ```
-backend/               FastAPI + Postgres
+backend/               FastAPI + Postgres (unchanged from before)
   app/
-    models.py          Institute, Teacher, Student, ClassSession, Test, FeeRecord, etc.
-    schemas.py          Pydantic request/response shapes
-    auth.py             JWT + password hashing
-    routers/
-      auth.py           phone+password login
-      classes.py        schedule/cancel -> fans out WhatsApp/SMS to the batch
-      tests.py           create+take MCQ or locked-document tests, anti-cheat flag endpoint
-      payments.py        Razorpay order creation + webhook (signature-verified)
-    services/
-      notify.py          WhatsApp Cloud API primary, Twilio SMS fallback
-      mcq_gen.py          stub — wire up an LLM call here for real generation
+    models.py, schemas.py, auth.py
+    routers/            auth, classes, tests, payments
+    services/           notify.py (WhatsApp+SMS), mcq_gen.py
 
-android/                Kotlin skeleton
-  .../test/LockedTestActivity.kt   the actual "locks the screen" feature (Lock Task Mode)
-  .../api/ApiClient.kt             Retrofit client hitting the backend
+webapp/                 React + Vite + Capacitor — this IS the mobile app once wrapped
+  src/
+    api/client.ts        talks to the FastAPI backend
+    plugins/lockTask.ts   TS interface to the native plugin, no-ops gracefully on web
+    pages/
+      Login.tsx
+      Dashboard.tsx        class list + cancel
+      ScheduleClass.tsx
+      TakeTest.tsx          MCQ form OR locked-document view depending on test type
+      Payments.tsx          fee tracker table
+  capacitor.config.ts
+
+  android-plugin-src/    NOT yet inside an actual android/ folder - see setup below
+    com/wandor/app/plugins/LockTaskPlugin.kt
 ```
 
-## Key architecture calls (and why)
+## Why Capacitor instead of full native
 
-- **Institute-scoped multi-tenancy**: every table hangs off `institute_id`. This is
-  the whole SaaS model — one deployment, many independent coaching centres, zero
-  data leakage between them if you're disciplined about filtering every query by it.
-- **Phone-first auth, not email**: your users are teachers who may not check email
-  regularly. Phone + password (or later, OTP) matches how WhatsApp/UPI already works
-  for this demographic.
-- **WhatsApp primary, SMS fallback**: WhatsApp Cloud API is free-ish for
-  session messages but requires pre-approved templates outside a 24h window
-  (that's why `notify()` takes a `template_name`). Twilio SMS as the safety net
-  when a number isn't on WhatsApp or delivery fails.
-- **Two-tier anti-cheat**: v1 uses Android's plain Lock Task Mode (screen pinning) —
-  works with zero extra setup, catches app-switches via `onUserLeaveHint()`/`onPause()`,
-  flags rather than auto-fails (teacher makes the final call — false positives happen).
-  v2 upgrade path noted in code: device-owner/MDM provisioning makes the lock
-  genuinely unbreakable, but that requires the institute to enroll the tablet/phone,
-  which is a bigger ask — don't build it until a paying customer needs it.
-- **Razorpay over Stripe**: UPI support. Non-negotiable for this market.
+- One codebase for web + mobile UI = way less to maintain for a small/solo team
+- You already know Python (backend) and are learning Kotlin — Capacitor lets you
+  use that Kotlin exactly where it's actually needed (the lock feature) instead
+  of writing an entire parallel Android app
+- Downside, to be upfront about it: Capacitor apps feel slightly less "native" than
+  fully native ones, and you're trusting a webview for the UI. For this use case
+  (forms, lists, a test-taking screen) that tradeoff is fine — this isn't a
+  graphics-heavy app.
 
-## Not built yet (intentionally, for you to prioritize)
+## Setting up the Android wrapper (do this once webapp/ has real content)
 
-- Student-facing auth (attempts currently take a raw `student_id` — fine for MVP,
-  needs a real login before launch)
-- File upload endpoint for test documents (assumes you already have a URL from S3/GCS)
-- Attendance tracking (you mentioned it in the pitch but not the feature breakdown —
-  flag if you want a model+router for it)
-- Actual LLM wiring in `mcq_gen.py`
-- Alembic migrations (right now `Base.metadata.create_all` on startup — fine for dev,
-  swap to Alembic before you have real user data you can't afford to nuke)
+```bash
+cd webapp
+npm install
+npm run build
+npx cap add android          # generates the android/ folder from scratch
+npx cap sync
+```
 
-## Running it
+Then:
+1. Copy `android-plugin-src/com/wandor/app/plugins/LockTaskPlugin.kt` into
+   `android/app/src/main/java/com/wandor/app/plugins/`
+2. Register it in the generated `MainActivity.java` — see the comment block at
+   the bottom of `LockTaskPlugin.kt` for the exact two-line override needed
+   (`onUserLeaveHint()` isn't exposed to plugins by default, so the host
+   Activity needs to forward it)
+3. Open `android/` in Android Studio to build/run on a device or emulator
+
+## Not built yet (unchanged priorities from before)
+
+- Student-facing auth (test attempts take a raw `student_id` for now)
+- File upload endpoint for test documents (assumes a URL from S3/GCS already)
+- Attendance tracking
+- Real LLM wiring in `mcq_gen.py`
+- Alembic migrations
+- Tier-2 device-owner/MDM lock (current lock is screen-pinning, exitable via a
+  long-press gesture that gets logged — be upfront with institutes that this is
+  "flags attempted cheating," not "physically impossible to cheat," unless you
+  build the MDM tier later)
+
+## Running the backend
 
 ```bash
 cd backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # fill in your keys
+cp .env.example .env
 uvicorn app.main:app --reload
+```
+
+## Running the web app
+
+```bash
+cd webapp
+npm install
+npm run dev   # http://localhost:5173
 ```
