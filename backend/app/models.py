@@ -1,5 +1,7 @@
 import enum
 import uuid
+import random
+import string
 from datetime import datetime
 
 from sqlalchemy import (
@@ -15,6 +17,10 @@ def gen_uuid():
     return str(uuid.uuid4())
 
 
+def gen_invite_code():
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+
+
 class Institute(Base):
     """A coaching centre / individual teacher's 'org'. Everything is scoped to this."""
     __tablename__ = "institutes"
@@ -22,6 +28,7 @@ class Institute(Base):
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     name = Column(String, nullable=False)
     owner_phone = Column(String, nullable=False, unique=True)  # login is phone-first, not email
+    invite_code = Column(String, nullable=False, unique=True, default=gen_invite_code)
     plan = Column(String, default="free")  # free / basic / pro - your SaaS tiers
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -43,13 +50,24 @@ class Teacher(Base):
     institute = relationship("Institute", back_populates="teachers")
 
 
+class SuperAdmin(Base):
+    __tablename__ = "superadmins"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    name = Column(String, nullable=False)
+    phone = Column(String, nullable=False, unique=True)
+    hashed_password = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Student(Base):
     __tablename__ = "students"
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     institute_id = Column(UUID(as_uuid=False), ForeignKey("institutes.id"))
     name = Column(String, nullable=False)
-    phone = Column(String, nullable=False)  # WhatsApp notifications go here
+    phone = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=False)
     parent_phone = Column(String, nullable=True)  # a LOT of Indian coaching centres notify parents, not just students
     batch = Column(String, nullable=True)  # e.g. "Class 10 - Batch A"
 
@@ -95,6 +113,10 @@ class FeeRecord(Base):
     is_paid = Column(Boolean, default=False)
 
     student = relationship("Student", back_populates="fee_records")
+
+    @property
+    def student_name(self) -> str:
+        return self.student.name if self.student else ""
 
 
 class TestType(str, enum.Enum):
