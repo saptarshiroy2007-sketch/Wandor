@@ -35,7 +35,8 @@ def admin_summary(db: Session = Depends(get_db), _: object = Depends(get_current
 
 @router.get("/institutes", response_model=list[InstituteAdminOut])
 def list_institutes(db: Session = Depends(get_db), _: object = Depends(get_current_superadmin)):
-    institutes = db.query(
+    institutes = (
+    db.query(
         Institute.id,
         Institute.name,
         Institute.owner_phone,
@@ -52,6 +53,7 @@ def list_institutes(db: Session = Depends(get_db), _: object = Depends(get_curre
     .join(FeeRecord, FeeRecord.student_id == Student.id, isouter=True)
     .group_by(Institute.id)
     .all()
+)
 
     response = []
     for row in institutes:

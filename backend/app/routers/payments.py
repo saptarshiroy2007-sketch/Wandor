@@ -89,20 +89,7 @@ def create_order(
     if fee.is_paid:
         raise HTTPException(status_code=400, detail="Already paid")
 
-<<<<<<< HEAD
     client = get_razorpay_client()
-=======
-    role = current[1]
-    if role == "teacher":
-        teacher = current[0]
-        if fee.student.institute_id != teacher.institute_id:
-            raise HTTPException(status_code=403, detail="Not authorized to create order for this fee record")
-    else:
-        student = current[0]
-        if fee.student_id != student.id:
-            raise HTTPException(status_code=403, detail="Students can only pay their own fees")
-
->>>>>>> origin/aahir
     order = client.order.create({
         "amount": int(fee.amount_due * 100),  # paise
         "currency": "INR",
