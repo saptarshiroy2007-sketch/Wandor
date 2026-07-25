@@ -2,7 +2,6 @@ import hmac
 import hashlib
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-import razorpay
 
 from ..database import get_db, settings
 from ..models import FeeRecord, Teacher
@@ -11,7 +10,13 @@ from ..auth import get_current_teacher
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
-client = razorpay.Client(auth=(settings.razorpay_key_id, settings.razorpay_key_secret))
+
+def get_razorpay_client():
+    """Imported lazily so the whole backend doesn't fail to boot if the razorpay SDK
+    has a packaging hiccup (it depends on pkg_resources/setuptools, which isn't always
+    present in a fresh venv) or if you just haven't set up Razorpay keys yet locally."""
+    import razorpay
+    return razorpay.Client(auth=(settings.razorpay_key_id, settings.razorpay_key_secret))
 
 
 @router.get("/due", response_model=list[FeeRecordOut])
@@ -34,6 +39,7 @@ def create_order(payload: CreateOrderRequest, db: Session = Depends(get_db)):
     if fee.is_paid:
         raise HTTPException(status_code=400, detail="Already paid")
 
+    client = get_razorpay_client()
     order = client.order.create({
         "amount": int(fee.amount_due * 100),  # paise
         "currency": "INR",
