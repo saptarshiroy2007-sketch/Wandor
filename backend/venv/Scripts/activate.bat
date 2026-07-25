@@ -8,7 +8,11 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
+<<<<<<< HEAD
 set "VIRTUAL_ENV=C:\Users\sapta\Documents\Python projects\wandor\backend\venv"
+=======
+set "VIRTUAL_ENV=C:\Users\aahir\OneDrive\Desktop\WANDOR\backend\venv"
+>>>>>>> origin/aahir
 
 if not defined PROMPT set PROMPT=$P$G
 

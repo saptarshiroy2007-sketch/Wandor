@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
-from ..database import get_db
+from ..database import SessionLocal, get_db
 from ..models import ClassSession, ClassStatus, Student, Teacher, NotificationLog
 from ..schemas import ClassCreate, ClassCancel, ClassOut
 from ..auth import get_current_teacher
@@ -11,22 +11,26 @@ from ..services.notify import notify
 router = APIRouter(prefix="/classes", tags=["classes"])
 
 
-def _notify_batch(db: Session, institute_id: str, batch: str, message: str, template: str | None = None):
+def _notify_batch(institute_id: str, batch: str, message: str, template: str | None = None):
     """Fires notifications to every student (and parent, if set) in a batch. Runs as a
     background task so the teacher's API call returns instantly instead of blocking on
     N WhatsApp calls."""
-    students = db.query(Student).filter(
-        Student.institute_id == institute_id, Student.batch == batch
-    ).all()
-    for s in students:
-        channel = notify(s.phone, message, template)
-        db.add(NotificationLog(institute_id=institute_id, recipient_phone=s.phone,
-                                channel=channel, message=message, status=channel))
-        if s.parent_phone:
-            p_channel = notify(s.parent_phone, message, template)
-            db.add(NotificationLog(institute_id=institute_id, recipient_phone=s.parent_phone,
-                                    channel=p_channel, message=message, status=p_channel))
-    db.commit()
+    db = SessionLocal()
+    try:
+        students = db.query(Student).filter(
+            Student.institute_id == institute_id, Student.batch == batch
+        ).all()
+        for s in students:
+            channel = notify(s.phone, message, template)
+            db.add(NotificationLog(institute_id=institute_id, recipient_phone=s.phone,
+                                    channel=channel, message=message, status=channel))
+            if s.parent_phone:
+                p_channel = notify(s.parent_phone, message, template)
+                db.add(NotificationLog(institute_id=institute_id, recipient_phone=s.parent_phone,
+                                        channel=p_channel, message=message, status=p_channel))
+        db.commit()
+    finally:
+        db.close()
 
 
 @router.post("", response_model=ClassOut)
