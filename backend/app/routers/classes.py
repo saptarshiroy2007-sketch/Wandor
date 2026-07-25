@@ -54,7 +54,7 @@ def schedule_class(
     db.refresh(session)
 
     msg = f"New class scheduled: {payload.subject} for {payload.batch} on {payload.start_time.strftime('%d %b, %I:%M %p')}"
-    background_tasks.add_task(_notify_batch, db, teacher.institute_id, payload.batch, msg, "class_scheduled")
+    background_tasks.add_task(_notify_batch, teacher.institute_id, payload.batch, msg, "class_scheduled")
 
     return session
 
@@ -80,7 +80,7 @@ def cancel_class(
 
     reason_txt = f" ({payload.reason})" if payload.reason else ""
     msg = f"Class CANCELLED: {session.subject} for {session.batch} originally at {session.start_time.strftime('%d %b, %I:%M %p')}{reason_txt}"
-    background_tasks.add_task(_notify_batch, db, teacher.institute_id, session.batch, msg, "class_cancelled")
+    background_tasks.add_task(_notify_batch, teacher.institute_id, session.batch, msg, "class_cancelled")
 
     return session
 

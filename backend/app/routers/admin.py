@@ -46,7 +46,9 @@ def list_institutes(db: Session = Depends(get_db), _: object = Depends(get_curre
         func.count(Student.id).label("total_students"),
         func.coalesce(func.sum(FeeRecord.amount_paid), 0.0).label("total_paid"),
         func.coalesce(func.sum(FeeRecord.amount_due - FeeRecord.amount_paid), 0.0).label("total_due"),
-        func.count(func.nullif(FeeRecord.is_paid, True)).label("overdue_count"),
+        func.count(
+            func.nullif(FeeRecord.is_paid, True)
+        ).filter(FeeRecord.due_date < func.now()).label("overdue_count"),
     )
     .join(Teacher, Teacher.institute_id == Institute.id, isouter=True)
     .join(Student, Student.institute_id == Institute.id, isouter=True)
