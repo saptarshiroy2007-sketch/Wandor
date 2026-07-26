@@ -3,19 +3,14 @@ import { useParams } from 'react-router-dom';
 import { startTestAttempt, submitTestAttempt, flagAttempt } from '../api/client';
 import { LockTask } from '../plugins/lockTask';
 
-/**
- * Handles both test types. For 'document' type, this is the screen that triggers
- * the native lock (via LockTask plugin) and listens for leave-attempt events,
- * forwarding each one to the backend flag endpoint. For 'mcq' it's a normal form.
- */
 export default function TakeTest() {
   const { testId } = useParams();
   const [attempt, setAttempt] = useState<any>(null);
   const [flagCount, setFlagCount] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    // studentId would come from student-facing auth once that's built - see README TODOs
     const studentId = localStorage.getItem('wandor_student_id') || 'demo-student';
     startTestAttempt(testId!, studentId).then(setAttempt);
   }, [testId]);
@@ -36,44 +31,118 @@ export default function TakeTest() {
     };
   }, [attempt]);
 
-  if (!attempt) return <p>Loading test...</p>;
+  async function submitAndFinish() {
+    setSubmitting(true);
+    try {
+      if (attempt.type === 'mcq') {
+        const payload = (Object.keys(answers) as string[]).map((question_id) => ({
+          question_id,
+          chosen_option: answers[question_id],
+        }));
+        const result = await submitTestAttempt(attempt.attempt_id, payload);
+        alert(`Score: ${result.score}/${result.total}`);
+      } else {
+        await submitTestAttempt(attempt.attempt_id, []);
+        alert('Test submitted successfully');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
-  if (attempt.type === 'document') {
+  if (!attempt) {
     return (
-      <div>
-        <h1>{attempt.type === 'document' ? 'Locked test' : ''}</h1>
-        {flagCount > 0 && <p>⚠ Leaving the screen has been logged ({flagCount}x)</p>}
-        <iframe src={attempt.document_url} style={{ width: '100%', height: '80vh' }} title="Test document" />
-        <button onClick={() => submitAndFinish()}>Submit</button>
+      <div className="min-h-screen bg-cream flex items-center justify-center">
+        <p className="text-sm text-ink/50">Loading test…</p>
       </div>
     );
   }
 
-  async function submitAndFinish() {
-    const payload = Object.entries(answers).map(([question_id, chosen_option]) => ({ question_id, chosen_option }));
-    const result = await submitTestAttempt(attempt.attempt_id, payload);
-    alert(`Score: ${result.score}/${result.total}`);
+  /* ── MCQ variant ── */
+  if (attempt.type === 'mcq') {
+    return (
+      <div className="min-h-screen bg-cream">
+        <div className="max-w-xl mx-auto px-4 py-8">
+          <h1 className="font-display text-2xl font-semibold text-ink tracking-tight mb-6">
+            MCQ Test
+          </h1>
+
+          {attempt.questions?.map((q: any) => (
+            <div
+              key={q.id}
+              className="bg-white rounded-xl border border-black/5 px-4 py-3.5 mb-4"
+            >
+              <p className="text-sm font-medium text-ink mb-3">{q.text}</p>
+              <div className="space-y-2">
+                {['a', 'b', 'c', 'd'].map((opt) => (
+                  <label
+                    key={opt}
+                    className="flex items-center gap-2.5 text-sm text-ink/70 cursor-pointer hover:text-ink transition-colors"
+                  >
+                    <input
+                      type="radio"
+                      name={q.id}
+                      value={opt}
+                      checked={answers[q.id] === opt}
+                      onChange={() =>
+                        setAnswers((prev) => ({ ...prev, [q.id]: opt }))
+                      }
+                      className="accent-teal-700"
+                    />
+                    {q[`option_${opt}`]}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          <button
+            onClick={submitAndFinish}
+            disabled={submitting}
+            className="w-full rounded-lg bg-teal-800 text-white text-sm font-medium py-2.5 hover:bg-teal-900 disabled:opacity-60 transition-colors"
+          >
+            {submitting ? 'Submitting…' : 'Submit'}
+          </button>
+        </div>
+      </div>
+    );
   }
 
+  /* ── Locked/document variant ── */
   return (
-    <div>
-      <h1>{attempt.questions ? 'MCQ Test' : ''}</h1>
-      {attempt.questions?.map((q: any) => (
-        <div key={q.id}>
-          <p>{q.text}</p>
-          {['a', 'b', 'c', 'd'].map((opt) => (
-            <label key={opt}>
-              <input
-                type="radio"
-                name={q.id}
-                onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
-              />
-              {q[`option_${opt}`]}
-            </label>
-          ))}
-        </div>
-      ))}
-      <button onClick={submitAndFinish}>Submit</button>
+    <div className="min-h-screen bg-ink flex flex-col">
+      {/* Status bar */}
+      <div className="bg-black/20 px-4 py-3 flex items-center justify-between">
+        <span className="text-xs font-medium text-white/70">
+          Locked test in progress
+        </span>
+        {flagCount > 0 && (
+          <span className="text-xs font-medium text-amber-400">
+            ⚠ {flagCount} leave attempt{flagCount !== 1 ? 's' : ''} logged
+          </span>
+        )}
+      </div>
+
+      {/* Document iframe */}
+      <div className="flex-1">
+        <iframe
+          src={attempt.document_url}
+          className="w-full h-full"
+          title="Test document"
+        />
+      </div>
+
+      {/* Submit bar */}
+      <div className="bg-black/20 px-4 py-3">
+        <button
+          onClick={submitAndFinish}
+          disabled={submitting}
+          className="w-full rounded-lg bg-teal-700 text-white text-sm font-medium py-2.5 hover:bg-teal-600 disabled:opacity-60 transition-colors"
+        >
+          {submitting ? 'Submitting…' : 'Submit test'}
+        </button>
+      </div>
     </div>
   );
 }
+

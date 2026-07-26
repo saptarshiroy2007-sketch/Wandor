@@ -6,13 +6,15 @@ import Dashboard from './pages/Dashboard';
 import ScheduleClass from './pages/ScheduleClass';
 import TakeTest from './pages/TakeTest';
 import Payments from './pages/Payments';
+import AppShell from './components/AppShell';
+import './index.css';
 
 function isLoggedIn() {
   return !!localStorage.getItem('wandor_token');
 }
 
 function Protected({ children }: { children: React.ReactNode }) {
-  return isLoggedIn() ? <>{children}</> : <Navigate to="/login" />;
+  return isLoggedIn() ? <AppShell>{children}</AppShell> : <Navigate to="/login" />;
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -28,3 +30,4 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </BrowserRouter>
   </React.StrictMode>
 );
+
