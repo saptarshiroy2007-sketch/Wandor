@@ -1,0 +1,23 @@
+# --- secrets ---
+.env
+*.env.local
+backend/.env
+
+# --- Python (backend) ---
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.pyc
+backend/uploads/
+
+# --- Node (webapp) ---
+webapp/node_modules/
+webapp/dist/
+webapp/android/
+webapp/.vite/
+
+# --- OS / editor cruft ---
+.DS_Store
+*.swp
+.vscode/
+.idea/

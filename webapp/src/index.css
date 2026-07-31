@@ -1,0 +1,194 @@
+/*
+  Design direction: "the roll-call register" — grounded in the physical attendance
+  ledgers and marksheets every Indian tuition centre already keeps. Chalkboard-green
+  nav like a classroom board, ruled paper on cards like a register page, and status
+  badges styled as rubber ink-stamps. Signature element: the stamp badge.
+  Data (phone numbers, ids, percentages, dates) sets in mono - it's a data-heavy app,
+  worth a dedicated register-column feel there.
+*/
+:root {
+  --paper: #faf6ec;
+  --chalkboard: #1f3b34;
+  --chalkboard-line: #3a5c50;
+  --ink: #1c2320;
+  --muted: #6b6456;
+  --rule: #ddd3ba;
+  --surface: #ffffff;
+  --accent: #3c6e58;
+  --accent-ink: #ffffff;
+  --stamp-red: #a73a2e;
+  --radius: 6px;
+
+  --font-display: 'Zilla Slab', Georgia, serif;
+  --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+
+  font-family: var(--font-body);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+#root { min-height: 100vh; }
+
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.005em; margin: 0 0 12px; color: var(--ink); }
+h1 { font-size: 26px; }
+h2 {
+  font-size: 13px;
+  font-family: var(--font-body);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  margin-top: 30px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+p { margin: 0 0 8px; color: var(--muted); }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+/* Ruled-paper card: faint horizontal rules like a register page, plus a red
+   "margin line" on the left the way school notebooks are ruled. */
+.card {
+  position: relative;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 27px,
+      var(--rule) 27px,
+      var(--rule) 28px
+    ),
+    var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--stamp-red);
+  border-radius: var(--radius);
+  padding: 16px 16px 16px 18px;
+  margin-bottom: 12px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.hstack { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+input, select, textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  font-family: var(--font-body);
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+form.stack label { margin-top: 4px; }
+
+button, .btn {
+  appearance: none;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: 9px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+button:hover { opacity: 0.88; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:focus-visible, .btn:focus-visible, a:focus-visible, input:focus-visible {
+  outline: 2px solid var(--stamp-red);
+  outline-offset: 2px;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+}
+.btn-danger { background: var(--stamp-red); border-color: var(--stamp-red); }
+.btn-sm { padding: 5px 10px; font-size: 13px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--rule); }
+th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-body); }
+td { font-family: var(--font-mono); font-size: 13px; }
+
+/* Signature element: status pills styled as rubber ink-stamps rather than flat
+   pills - slight rotation, dashed ring, uppercase spaced mono type. */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  background: transparent;
+  transform: rotate(-1.2deg);
+}
+.badge-muted { color: var(--muted); border-color: var(--rule); }
+.badge-danger { color: var(--stamp-red); border-color: var(--stamp-red); }
+
+.error { color: var(--stamp-red); font-size: 13px; margin: 4px 0 0; font-family: var(--font-mono); }
+.empty { color: var(--muted); font-size: 14px; padding: 12px 0; font-style: italic; }
+
+/* Nav: chalkboard bar, like the board at the front of the classroom */
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--chalkboard);
+  padding: 14px 20px;
+  margin-bottom: 8px;
+}
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 640px;
+  margin: 0 auto;
+  width: 100%;
+}
+.nav-links { display: flex; gap: 2px; flex-wrap: wrap; }
+.nav-links a, .nav-links .active {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #cfe0d8;
+  border-bottom: 2px solid transparent;
+}
+.nav-links .active { color: #ffffff; border-bottom: 2px solid var(--stamp-red); }
+.nav-links a:hover { text-decoration: none; color: #ffffff; }
+.nav-inner .btn-ghost { color: #e8efeb; border-color: var(--chalkboard-line); }
+.nav-inner .btn-ghost:hover { background: var(--chalkboard-line); }
+.brand { font-family: var(--font-display); font-weight: 600; font-size: 18px; color: #ffffff; letter-spacing: -0.01em; }
