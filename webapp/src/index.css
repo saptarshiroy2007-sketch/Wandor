@@ -1,0 +1,209 @@
+/*
+  Design direction: "the admit card" — grounded in the exam hall-ticket / ID card
+  every coaching-institute student carries constantly (JEE/NEET/board admit cards,
+  ID cards, hall tickets). Navy letterhead nav like an exam-board header, amber
+  ink-seal for status, perforated-edge + registration-mark cards like a ticket stub.
+  Signature element: the perforated card with corner registration marks.
+  Data (ids, phone, %, dates) stays mono - fits the "official document" numbering feel.
+*/
+:root {
+  --paper: #f6f7fb;
+  --surface: #ffffff;
+  --navy: #142138;
+  --navy-2: #1e2f52;
+  --ink: #12141c;
+  --muted: #5b6478;
+  --rule: #dadfea;
+  --amber: #d98e2b;
+  --amber-deep: #b5701a;
+  --accent: var(--navy);
+  --accent-ink: #ffffff;
+  --radius: 4px;
+
+  --font-display: 'Space Grotesk', 'Segoe UI', sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+
+  font-family: var(--font-body);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+#root { min-height: 100vh; }
+
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; margin: 0 0 12px; color: var(--ink); }
+h1 { font-size: 26px; }
+h2 {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+  margin-top: 30px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+p { margin: 0 0 8px; color: var(--muted); }
+
+a { color: var(--navy-2); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+/* Admit-card / hall-ticket card: registration-mark crosshairs top corners,
+   perforated tear-line down the right edge like a ticket stub. */
+.card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 16px 24px 16px 16px;
+  margin-bottom: 14px;
+  background-image:
+    linear-gradient(var(--rule) 1px, transparent 1px),
+    linear-gradient(var(--rule) 1px, transparent 1px);
+  background-size: 100% 100%;
+}
+.card::before, .card::after {
+  content: '';
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--muted);
+  opacity: 0.55;
+}
+.card::before { top: 6px; left: 6px; border-right: none; border-bottom: none; }
+.card::after { top: 6px; right: 6px; border-left: none; border-bottom: none; }
+/* perforation: dashed line + tab notches, right edge */
+.card {
+  border-right: 1px dashed #b7bfd1;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.hstack { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+input, select, textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  font-family: var(--font-body);
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--navy); outline-offset: -1px; }
+
+label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); }
+
+form.stack label { margin-top: 4px; }
+
+button, .btn {
+  appearance: none;
+  border: 1px solid var(--navy);
+  background: var(--navy);
+  color: var(--accent-ink);
+  padding: 9px 16px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+button:hover { background: var(--navy-2); border-color: var(--navy-2); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:focus-visible, .btn:focus-visible, a:focus-visible, input:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+}
+.btn-danger { background: #a73a2e; border-color: #a73a2e; }
+.btn-sm { padding: 5px 10px; font-size: 13px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--rule); }
+th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); }
+td { font-family: var(--font-mono); font-size: 13px; }
+
+/* Signature element: status as a circular ink-seal (double ring), the way an
+   exam authority stamps a hall ticket, instead of a flat pill. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--amber-deep);
+  border: 1.5px solid var(--amber);
+  outline: 1px solid var(--amber);
+  outline-offset: 2px;
+  background: #fdf6ea;
+}
+.badge-muted { color: var(--muted); border-color: var(--rule); outline-color: var(--rule); background: #f5f6f9; }
+.badge-danger { color: #a73a2e; border-color: #c9584a; outline-color: #c9584a; background: #fbf0ee; }
+
+.error { color: #a73a2e; font-size: 13px; margin: 4px 0 0; font-family: var(--font-mono); }
+.empty { color: var(--muted); font-size: 14px; padding: 12px 0; font-style: italic; }
+
+/* Nav: exam-board letterhead - navy bar, amber rule underneath like an
+   official seal-stripe on a hall ticket. */
+.nav {
+  background: var(--navy);
+  padding: 14px 20px;
+  margin-bottom: 8px;
+  border-bottom: 3px solid var(--amber);
+}
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 640px;
+  margin: 0 auto;
+  width: 100%;
+}
+.nav-links { display: flex; gap: 2px; flex-wrap: wrap; }
+.nav-links a, .nav-links .active {
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: #b7c0d6;
+  border-bottom: 2px solid transparent;
+}
+.nav-links .active { color: #ffffff; border-bottom: 2px solid var(--amber); }
+.nav-links a:hover { text-decoration: none; color: #ffffff; }
+.nav-inner .btn-ghost { color: #e4e8f2; border-color: var(--navy-2); }
+.nav-inner .btn-ghost:hover { background: var(--navy-2); }
+.brand { font-family: var(--font-display); font-weight: 700; font-size: 18px; color: #ffffff; letter-spacing: -0.01em; }

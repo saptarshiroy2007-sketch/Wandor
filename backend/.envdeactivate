@@ -1,0 +1,39 @@
+DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/wandor
+JWT_SECRET=change_this_to_something_random
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=1440
+
+# Twilio (SMS fallback + can also do WhatsApp via Twilio if you don't want to deal with Meta's onboarding)
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_FROM_NUMBER=
+
+# WhatsApp Cloud API (Meta) - primary channel, cheaper at scale than Twilio's WA markup
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_API_VERSION=v20.0
+
+# Razorpay
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+# Separate from RAZORPAY_KEY_SECRET - this is the webhook signing secret you set
+# in the Razorpay dashboard under Webhooks, used to verify POST /payments/webhook.
+RAZORPAY_WEBHOOK_SECRET=
+
+# Anthropic - powers real MCQ generation in services/mcq_gen.py.
+# Leave blank to use the placeholder stub (app still runs fine, just returns fake questions).
+ANTHROPIC_API_KEY=
+
+# File storage - for test documents (locked-doc test mode) and any other uploads.
+# STORAGE_BACKEND=local is fine for single-instance dev. Switch to s3 once you're running
+# multiple backend instances (local disk isn't shared across instances behind a load balancer).
+STORAGE_BACKEND=local
+UPLOAD_DIR=uploads
+
+# Only needed if STORAGE_BACKEND=s3. Works with real AWS S3 or any S3-compatible service
+# (Cloudflare R2, Backblaze B2) - leave S3_ENDPOINT_URL blank for real AWS.
+S3_BUCKET=
+S3_ENDPOINT_URL=
+S3_PUBLIC_BASE_URL=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
