@@ -1,27 +1,37 @@
 /*
-  Design direction: "the admit card" — grounded in the exam hall-ticket / ID card
-  every coaching-institute student carries constantly (JEE/NEET/board admit cards,
-  ID cards, hall tickets). Navy letterhead nav like an exam-board header, amber
-  ink-seal for status, perforated-edge + registration-mark cards like a ticket stub.
-  Signature element: the perforated card with corner registration marks.
-  Data (ids, phone, %, dates) stays mono - fits the "official document" numbering feel.
+  Design direction: "the question paper" — grounded in the product's actual core
+  (Wandor runs real MCQ tests), not decoration bolted on afterward. Pale exam-paper
+  background, exam-board ink-blue as the working accent, a highlighter-yellow used
+  ONLY for flags that need attention (overdue fees, weak questions, unmarked
+  attendance) - never decoratively. Signature element: the OMR bubble - a real exam
+  answer-sheet fill-in-the-circle control, used everywhere a person makes a binary or
+  multiple choice (attendance present/absent, MCQ answers), not just on the test page.
+  Brand mark: "W" set in Castellar (Roman inscriptional capitals) - gravitas of an
+  exam-board seal. Castellar isn't on Google Fonts (Monotype-owned, not freely
+  redistributable) - it renders correctly for the many people who already have it
+  system-installed (bundled with Windows/Office), and falls back to a small-caps serif
+  that apes the same inscriptional-capital feel for everyone else.
 */
 :root {
-  --paper: #f6f7fb;
-  --surface: #ffffff;
-  --navy: #142138;
-  --navy-2: #1e2f52;
-  --ink: #12141c;
-  --muted: #5b6478;
-  --rule: #dadfea;
-  --amber: #d98e2b;
-  --amber-deep: #b5701a;
-  --accent: var(--navy);
-  --accent-ink: #ffffff;
-  --radius: 4px;
+  --paper: #eeece1;
+  --surface: #fdfdf9;
+  --ink: #1a1a17;
+  --muted: #6b6656;
+  --rule: #cfc9b6;
 
-  --font-display: 'Space Grotesk', 'Segoe UI', sans-serif;
-  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ink-blue: #1f3f8f;
+  --ink-blue-deep: #16306e;
+  --highlight: #f2c94c;
+  --highlight-ink: #4a3a00;
+  --stamp-red: #ab3a2c;
+
+  --accent: var(--ink-blue);
+  --accent-ink: #ffffff;
+  --radius: 3px;
+
+  --font-display: 'Castellar', 'Cinzel', Georgia, 'Times New Roman', serif;
+  --font-heading: 'Archivo', 'Arial Narrow', sans-serif;
+  --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
 
   font-family: var(--font-body);
@@ -32,6 +42,10 @@
 body {
   margin: 0;
   background: var(--paper);
+  /* faint ruled-paper texture - horizontal guideline rows, like exam answer sheets */
+  background-image: linear-gradient(var(--rule) 1px, transparent 1px);
+  background-size: 100% 32px;
+  background-attachment: local;
   color: var(--ink);
   font-size: 15px;
   line-height: 1.5;
@@ -39,8 +53,8 @@ body {
 
 #root { min-height: 100vh; }
 
-h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; margin: 0 0 12px; color: var(--ink); }
-h1 { font-size: 26px; }
+h1, h2, h3 { font-family: var(--font-heading); font-weight: 700; letter-spacing: -0.005em; margin: 0 0 12px; color: var(--ink); }
+h1 { font-size: 24px; text-transform: uppercase; letter-spacing: 0.01em; }
 h2 {
   font-size: 12px;
   font-family: var(--font-mono);
@@ -54,7 +68,7 @@ h2 {
 }
 p { margin: 0 0 8px; color: var(--muted); }
 
-a { color: var(--navy-2); text-decoration: none; }
+a { color: var(--ink-blue); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 .page {
@@ -63,33 +77,15 @@ a:hover { text-decoration: underline; }
   padding: 24px 16px 64px;
 }
 
-/* Admit-card / hall-ticket card: registration-mark crosshairs top corners,
-   perforated tear-line down the right edge like a ticket stub. */
+/* Answer-sheet card: crisp white "sheet" sitting on the ruled paper background,
+   sharp corners (no soft border-radius - this is an official document, not an app card). */
 .card {
   position: relative;
   background: var(--surface);
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  padding: 16px 24px 16px 16px;
+  padding: 16px;
   margin-bottom: 14px;
-  background-image:
-    linear-gradient(var(--rule) 1px, transparent 1px),
-    linear-gradient(var(--rule) 1px, transparent 1px);
-  background-size: 100% 100%;
-}
-.card::before, .card::after {
-  content: '';
-  position: absolute;
-  width: 9px;
-  height: 9px;
-  border: 1.5px solid var(--muted);
-  opacity: 0.55;
-}
-.card::before { top: 6px; left: 6px; border-right: none; border-bottom: none; }
-.card::after { top: 6px; right: 6px; border-left: none; border-bottom: none; }
-/* perforation: dashed line + tab notches, right edge */
-.card {
-  border-right: 1px dashed #b7bfd1;
 }
 
 .row {
@@ -102,6 +98,33 @@ a:hover { text-decoration: underline; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 .hstack { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
+/* "Instructions box" - the boxed header every real exam paper opens with
+   ("Instructions: Fill only ONE bubble per question..."). Used for page intros
+   and empty states instead of a plain heading + paragraph - the box itself
+   signals "read this before you act." */
+.instructions-box {
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  background: var(--surface);
+  position: relative;
+}
+.instructions-box::before {
+  content: 'INSTRUCTIONS';
+  position: absolute;
+  top: -9px;
+  left: 10px;
+  background: var(--paper);
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.instructions-box p { color: var(--ink); margin: 0; font-size: 14px; }
+
 input, select, textarea {
   width: 100%;
   padding: 9px 11px;
@@ -112,7 +135,7 @@ input, select, textarea {
   font-size: 14px;
   font-family: var(--font-body);
 }
-input:focus, select:focus, textarea:focus { outline: 2px solid var(--navy); outline-offset: -1px; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--ink-blue); outline-offset: -1px; }
 
 label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); }
 
@@ -120,20 +143,21 @@ form.stack label { margin-top: 4px; }
 
 button, .btn {
   appearance: none;
-  border: 1px solid var(--navy);
-  background: var(--navy);
+  border: 1px solid var(--ink-blue);
+  background: var(--ink-blue);
   color: var(--accent-ink);
   padding: 9px 16px;
   border-radius: var(--radius);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
+  font-family: var(--font-heading);
+  letter-spacing: 0.01em;
   cursor: pointer;
-  font-family: var(--font-body);
 }
-button:hover { background: var(--navy-2); border-color: var(--navy-2); }
+button:hover { background: var(--ink-blue-deep); border-color: var(--ink-blue-deep); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 button:focus-visible, .btn:focus-visible, a:focus-visible, input:focus-visible {
-  outline: 2px solid var(--amber);
+  outline: 2px solid var(--highlight);
   outline-offset: 2px;
 }
 
@@ -142,48 +166,99 @@ button:focus-visible, .btn:focus-visible, a:focus-visible, input:focus-visible {
   color: var(--ink);
   border: 1px solid var(--rule);
 }
-.btn-danger { background: #a73a2e; border-color: #a73a2e; }
+.btn-danger { background: var(--stamp-red); border-color: var(--stamp-red); }
 .btn-sm { padding: 5px 10px; font-size: 13px; }
 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--rule); }
-th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); }
+th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); }
 td { font-family: var(--font-mono); font-size: 13px; }
 
-/* Signature element: status as a circular ink-seal (double ring), the way an
-   exam authority stamps a hall ticket, instead of a flat pill. */
+/* Status badge - kept quiet/neutral by default. Only the flagged/urgent state
+   (badge-flag) borrows the highlighter-yellow, so the highlight color stays
+   meaningful instead of decorative. */
 .badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 26px;
-  height: 26px;
+  height: 22px;
   padding: 0 9px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   font-size: 10px;
   font-family: var(--font-mono);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--amber-deep);
-  border: 1.5px solid var(--amber);
-  outline: 1px solid var(--amber);
-  outline-offset: 2px;
-  background: #fdf6ea;
+  color: var(--ink-blue-deep);
+  border: 1px solid var(--ink-blue);
+  background: #eaf0fb;
 }
-.badge-muted { color: var(--muted); border-color: var(--rule); outline-color: var(--rule); background: #f5f6f9; }
-.badge-danger { color: #a73a2e; border-color: #c9584a; outline-color: #c9584a; background: #fbf0ee; }
+.badge-muted { color: var(--muted); border-color: var(--rule); background: var(--paper); }
+.badge-danger { color: #ffffff; border-color: var(--stamp-red); background: var(--stamp-red); }
+/* The ONE place highlighter-yellow appears as a fill - genuinely needs eyes on it:
+   overdue fees, weak questions, unmarked attendance. */
+.badge-flag { color: var(--highlight-ink); border-color: #c9a227; background: var(--highlight); }
 
-.error { color: #a73a2e; font-size: 13px; margin: 4px 0 0; font-family: var(--font-mono); }
+.error { color: var(--stamp-red); font-size: 13px; margin: 4px 0 0; font-family: var(--font-mono); }
 .empty { color: var(--muted); font-size: 14px; padding: 12px 0; font-style: italic; }
 
-/* Nav: exam-board letterhead - navy bar, amber rule underneath like an
-   official seal-stripe on a hall ticket. */
+/* ---------- Signature element: the OMR bubble ---------- */
+/* A real answer-sheet fill-in-the-circle control. Wraps a native radio/checkbox for
+   accessibility (keyboard nav, screen readers) while fully re-skinning its appearance -
+   the native input is visually hidden but still focusable and operable.
+   Usage: <label class="omr-option"><input type="radio" .../><span class="omr-bubble"></span>Label text</label> */
+.omr-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  padding: 7px 4px;
+  font-size: 14px;
+  color: var(--ink);
+  width: auto;
+}
+.omr-option input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+.omr-bubble {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--ink-blue);
+  background: var(--surface);
+  position: relative;
+  transition: background 0.1s ease;
+}
+.omr-bubble::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--ink-blue);
+  transform: scale(0);
+  transition: transform 0.12s ease;
+}
+.omr-option input:checked + .omr-bubble::after { transform: scale(1); }
+.omr-option input:focus-visible + .omr-bubble { outline: 2px solid var(--highlight); outline-offset: 2px; }
+.omr-option:hover .omr-bubble { border-color: var(--ink-blue-deep); }
+/* Squared variant for present/absent-style binary marks (attendance), so it doesn't
+   read as "pick one of many" like the round MCQ bubble does. */
+.omr-bubble.square { border-radius: 4px; }
+.omr-bubble.square::after { border-radius: 2px; }
+
+/* Nav: exam-board letterhead - the Castellar/serif wordmark is the one place the
+   display face appears; everything else in the nav stays in the working grotesk. */
 .nav {
-  background: var(--navy);
-  padding: 14px 20px;
+  background: var(--surface);
+  padding: 12px 20px;
   margin-bottom: 8px;
-  border-bottom: 3px solid var(--amber);
+  border-bottom: 3px solid var(--ink);
 }
 .nav-inner {
   display: flex;
@@ -198,12 +273,41 @@ td { font-family: var(--font-mono); font-size: 13px; }
   padding: 6px 12px;
   border-radius: var(--radius);
   font-size: 13px;
-  font-family: var(--font-mono);
-  color: #b7c0d6;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  color: var(--muted);
   border-bottom: 2px solid transparent;
 }
-.nav-links .active { color: #ffffff; border-bottom: 2px solid var(--amber); }
-.nav-links a:hover { text-decoration: none; color: #ffffff; }
-.nav-inner .btn-ghost { color: #e4e8f2; border-color: var(--navy-2); }
-.nav-inner .btn-ghost:hover { background: var(--navy-2); }
-.brand { font-family: var(--font-display); font-weight: 700; font-size: 18px; color: #ffffff; letter-spacing: -0.01em; }
+.nav-links .active { color: var(--ink-blue); border-bottom: 2px solid var(--ink-blue); }
+.nav-links a:hover { text-decoration: none; color: var(--ink); }
+.nav-inner .btn-ghost { color: var(--muted); border-color: var(--rule); }
+.nav-inner .btn-ghost:hover { background: var(--paper); }
+
+/* Brand mark - "W" in Castellar, sitting in a thin ink-blue seal ring like an
+   exam-board stamp. Falls back to a small-caps serif "W" for anyone without
+   Castellar installed, so it never looks broken. */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand-mark {
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 1;
+  color: var(--ink-blue);
+  width: 34px;
+  height: 34px;
+  border: 1.5px solid var(--ink-blue);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.brand-word {
+  font-family: var(--font-display);
+  font-variant: small-caps;
+  font-size: 19px;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+}

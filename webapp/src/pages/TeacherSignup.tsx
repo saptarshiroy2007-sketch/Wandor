@@ -27,7 +27,10 @@ export default function TeacherSignup() {
 
   return (
     <div className="page" style={{ maxWidth: 360, paddingTop: '15vh' }}>
-      <h1>Wandor</h1>
+      <div className="brand" style={{ justifyContent: 'center', marginBottom: 4 }}>
+        <span className="brand-mark">W</span>
+        <span className="brand-word" style={{ fontSize: 26 }}>Wandor</span>
+      </div>
       <p>Teacher sign up (independent)</p>
       <form onSubmit={handleSubmit} className="card stack">
         <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />

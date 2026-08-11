@@ -59,7 +59,7 @@ export default function TakeTest() {
           <h1>Locked test</h1>
           {flagCount > 0 && <span className="badge badge-danger">⚠ logged {flagCount}x</span>}
         </div>
-        <iframe src={attempt.document_url} style={{ width: '100%', height: '78vh', border: '1px solid var(--line)', borderRadius: 8 }} title="Test document" />
+        <iframe src={attempt.document_url} style={{ width: '100%', height: '78vh', border: '1px solid var(--rule)', borderRadius: 3 }} title="Test document" />
         <button style={{ marginTop: 12 }} onClick={submitAndFinish}>Submit</button>
       </div>
     );
@@ -74,14 +74,15 @@ export default function TakeTest() {
             <p style={{ color: 'var(--ink)', fontWeight: 500 }}>{i + 1}. {q.text}</p>
             <div className="stack">
               {['a', 'b', 'c', 'd'].map((opt) => (
-                <label key={opt} className="hstack" style={{ fontSize: 14, color: 'var(--ink)' }}>
+                <label key={opt} className="omr-option" htmlFor={`${q.id}-${opt}`}>
                   <input
+                    id={`${q.id}-${opt}`}
                     type="radio"
-                    style={{ width: 'auto' }}
                     name={q.id}
                     checked={answers[q.id] === opt}
                     onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
                   />
+                  <span className="omr-bubble" />
                   {q[`option_${opt}`]}
                 </label>
               ))}

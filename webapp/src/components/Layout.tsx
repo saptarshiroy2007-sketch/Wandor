@@ -22,7 +22,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <div>
       <div className="nav">
         <div className="nav-inner">
-          <span className="brand">Wandor</span>
+          <span className="brand">
+            <span className="brand-mark">W</span>
+            <span className="brand-word">Wandor</span>
+          </span>
           <div className="hstack">
             {role === 'teacher' && (
               <div className="nav-links">

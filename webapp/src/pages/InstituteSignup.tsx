@@ -24,7 +24,10 @@ export default function InstituteSignup() {
 
   return (
     <div className="page" style={{ maxWidth: 360, paddingTop: '15vh' }}>
-      <h1>Wandor</h1>
+      <div className="brand" style={{ justifyContent: 'center', marginBottom: 4 }}>
+        <span className="brand-mark">W</span>
+        <span className="brand-word" style={{ fontSize: 26 }}>Wandor</span>
+      </div>
       <p>Institute sign up</p>
       <form onSubmit={handleSubmit} className="card stack">
         <input placeholder="Institute name" value={name} onChange={(e) => setName(e.target.value)} />

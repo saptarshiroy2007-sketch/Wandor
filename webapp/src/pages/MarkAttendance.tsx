@@ -67,14 +67,16 @@ export default function MarkAttendance() {
           ) : (
             <div className="stack">
               {students.map((s) => (
-                <label key={s.id} className="card row" style={{ cursor: 'pointer' }}>
+                <label key={s.id} className="card row" style={{ cursor: 'pointer', margin: 0 }}>
                   <span>{s.name}</span>
-                  <input
-                    type="checkbox"
-                    style={{ width: 'auto' }}
-                    checked={!!present[s.id]}
-                    onChange={(e) => setPresent((prev) => ({ ...prev, [s.id]: e.target.checked }))}
-                  />
+                  <span className="omr-option" style={{ padding: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={!!present[s.id]}
+                      onChange={(e) => setPresent((prev) => ({ ...prev, [s.id]: e.target.checked }))}
+                    />
+                    <span className="omr-bubble square" />
+                  </span>
                 </label>
               ))}
             </div>

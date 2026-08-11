@@ -7,7 +7,10 @@ export default function RoleSelect() {
 
   return (
     <div className="page" style={{ maxWidth: 360, paddingTop: '15vh' }}>
-      <h1>Wandor</h1>
+      <div className="brand" style={{ justifyContent: 'center', marginBottom: 4 }}>
+        <span className="brand-mark">W</span>
+        <span className="brand-word" style={{ fontSize: 26 }}>Wandor</span>
+      </div>
       <p>Who's logging in?</p>
 
       <div className="stack">

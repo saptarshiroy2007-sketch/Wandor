@@ -558,3 +558,68 @@ independent teachers and institute owners stay unrestricted.
   point, instead of matching on raw strings.
 - No self-signup for students/parents was added, by design, per the user's explicit
   requirement.
+
+---
+
+## Follow-up session: theme redesign — "the question paper"
+
+**Why:** the previous theme ("the admit card," navy/amber) read as bland/generic
+corporate palette despite the ticket-concept details in the CSS comments — the
+personality was too subtle to register at a glance. Also caught: HANDOFF.md's
+"roll-call register" description didn't match what was actually live in `index.css`
+("the admit card") — theme got swapped at some point without a log entry. This entry
+is that log.
+
+**New direction:** "the question paper" — grounded in the fact that Wandor runs real
+MCQ tests, not decoration bolted on. Pale exam-paper background with a faint ruled-line
+texture, exam-board ink-blue (`#1f3f8f`) as the working accent, highlighter-yellow
+(`#f2c94c`) used ONLY for flag states (overdue fees, weak questions, unmarked
+attendance) so it stays meaningful instead of decorative.
+
+**Signature element:** the OMR bubble (`.omr-option` / `.omr-bubble` in `index.css`) -
+a real answer-sheet fill-in-the-circle control wrapping a visually-hidden native
+radio/checkbox (keeps keyboard nav + screen readers working). Square variant
+(`.omr-bubble.square`) for binary present/absent marks so it doesn't read as
+"pick one of many" the way the round MCQ bubble does. Applied to:
+- `pages/TakeTest.tsx` - MCQ answer options (was plain `<input type=radio>`)
+- `pages/MarkAttendance.tsx` - present/absent checkbox (was plain `<input type=checkbox>`)
+
+**Logo/brand mark:** "W" set in Castellar (`.brand-mark`, `.brand-word` in
+`index.css`), a Roman-inscriptional-capitals face - fits the exam-board gravitas
+concept well. Castellar is Monotype-owned and NOT on Google Fonts (a request to add it
+was filed and closed) - no legit free CDN hosts it. It's referenced first in the font
+stack so it renders correctly for the many people who already have it system-installed
+(ships with Windows/MS Office), falling back to a small-caps serif that apes the same
+look for everyone else - never looks broken either way. If guaranteed identical
+rendering across every device matters later, that means buying a Castellar license or
+picking a genuinely-free lookalike (checked: "Kastellar" is one option, not verified
+for quality/license terms here).
+
+Applied the wordmark across `components/Layout.tsx` (in-app nav) and all 7 pre-login
+pages (`RoleSelect`, `Login`, `TeacherSignup`, `InstituteSignup`, `InstituteLogin`,
+`StudentLogin`, `ParentLogin`).
+
+**Other CSS changes worth knowing:**
+- Font stack swapped: `Space Grotesk`/`Inter` → `Archivo` (headings) + `IBM Plex Sans`
+  (body) + `IBM Plex Mono` (kept, for data - roll numbers, dates, table cells).
+- `--line` var renamed to `--rule` throughout (ruled-paper metaphor). One inline usage
+  in `TakeTest.tsx` (`var(--line)` on the locked-test iframe border) updated to match -
+  would've silently fallen back to browser default border color otherwise.
+- Card corners went from `border-radius: 8px` → `3px` (`--radius`) - sharp, like an
+  official document, not a soft app card.
+- New `.instructions-box` component - the boxed "INSTRUCTIONS" header pattern real
+  exam papers open with. Not yet applied to any page - available for empty
+  states/page intros next session.
+
+**Verified:** `tsc --noEmit` clean, `vite build` clean (6.39kB CSS, no errors). Not
+verified: actually rendered in a browser. No screenshot/browser tool was available this
+session - don't trust this is visually right until someone runs `npm run dev` and
+looks.
+
+### Not done yet
+- `.instructions-box` pattern built but unused - candidate for `Dashboard.tsx` and
+  other pages' empty states.
+- OMR bubble styling only applied to the two spots above - other binary/choice UI in
+  the app (if any exists elsewhere, e.g. role toggles) wasn't audited for consistency.
+- No favicon/app-icon file generated from the new "W" mark yet - `.brand-mark` is
+  in-page only, `index.html`'s `<link rel="icon">` (if any) wasn't touched.

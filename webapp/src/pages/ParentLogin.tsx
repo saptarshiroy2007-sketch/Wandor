@@ -24,7 +24,10 @@ export default function ParentLogin() {
 
   return (
     <div className="page" style={{ maxWidth: 360, paddingTop: '15vh' }}>
-      <h1>Wandor</h1>
+      <div className="brand" style={{ justifyContent: 'center', marginBottom: 4 }}>
+        <span className="brand-mark">W</span>
+        <span className="brand-word" style={{ fontSize: 26 }}>Wandor</span>
+      </div>
       <p>Log in with your child's phone number and the PIN their teacher gave you.</p>
       <form onSubmit={handleSubmit} className="card stack">
         <input placeholder="Child's phone" value={studentPhone} onChange={(e) => setStudentPhone(e.target.value)} />
