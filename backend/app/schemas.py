@@ -34,6 +34,31 @@ class InstituteLogin(BaseModel):
     password: str
 
 
+# ---------- Signup ----------
+# Deliberately no StudentSignup - students never self-register. A student's login is
+# always created for them, either by a teacher (POST /students) or an institute admin
+# (POST /institute/students).
+class TeacherSignup(BaseModel):
+    """Self-service signup for an INDEPENDENT teacher only - there's no institute_id
+    field here on purpose. A teacher can't self-attach to an institute at signup;
+    that binding only ever happens the other direction, when an institute admin adds
+    them via POST /institute/teachers. A teacher who signs up here and later gets
+    added to an institute by an admin would need a separate reconciliation step -
+    not handled yet, see notes."""
+    name: str
+    phone: str
+    password: str
+
+
+class InstituteSignup(BaseModel):
+    """Self-service institute signup - creates the Institute row AND activates its
+    login password in one step, replacing the old manual DB-insert +
+    scripts/set_institute_password.py bootstrap flow."""
+    name: str
+    owner_phone: str
+    password: str
+
+
 # ---------- Students ----------
 class StudentCreate(BaseModel):
     name: str
@@ -248,6 +273,7 @@ class TeacherCreate(BaseModel):
     phone: str
     password: str  # initial password the owner sets for this teacher to log in with
     is_owner: bool = False
+    batches: List[str] = []  # ignored if is_owner=True (owners aren't batch-scoped)
 
 
 class TeacherOut(BaseModel):
@@ -255,9 +281,16 @@ class TeacherOut(BaseModel):
     name: str
     phone: str
     is_owner: bool
+    batches: List[str] = []
 
     class Config:
         from_attributes = True
+
+
+class BatchAssignmentSet(BaseModel):
+    """Full replacement list - PUT semantics, not additive. Send every batch this
+    teacher should be assigned to, not just new ones."""
+    batches: List[str]
 
 
 # ---------- Payments ----------

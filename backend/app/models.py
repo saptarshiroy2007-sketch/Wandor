@@ -42,6 +42,21 @@ class Teacher(Base):
     is_owner = Column(Boolean, default=False)  # owner vs added-teacher (2-3 person team)
 
     institute = relationship("Institute", back_populates="teachers")
+    batch_assignments = relationship("TeacherBatchAssignment", back_populates="teacher", cascade="all, delete-orphan")
+
+
+class TeacherBatchAssignment(Base):
+    """Which batch(es) a non-owner, institute-affiliated teacher may add students to.
+    Independent teachers (Teacher.institute_id is None) and institute owners are never
+    scoped by this table - they can add students to any batch freely. This table only
+    matters for a teacher who (a) belongs to an institute and (b) is not the owner."""
+    __tablename__ = "teacher_batch_assignments"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    teacher_id = Column(UUID(as_uuid=False), ForeignKey("teachers.id"), nullable=False)
+    batch = Column(String, nullable=False)
+
+    teacher = relationship("Teacher", back_populates="batch_assignments")
 
 
 class Student(Base):

@@ -40,6 +40,25 @@ export async function instituteLogin(phone: string, password: string) {
   return data;
 }
 
+export async function teacherSignup(name: string, phone: string, password: string) {
+  // Always creates an INDEPENDENT teacher - there's no institute selector on this
+  // form on purpose. Joining an institute only ever happens the other direction
+  // (an institute admin adding you), never something a teacher self-attaches to.
+  const { data } = await api.post('/auth/teacher-signup', { name, phone, password });
+  localStorage.setItem('wandor_token', data.access_token);
+  localStorage.setItem('wandor_role', 'teacher');
+  return data;
+}
+
+export async function instituteSignup(name: string, ownerPhone: string, password: string) {
+  const { data } = await api.post('/auth/institute-signup', {
+    name, owner_phone: ownerPhone, password,
+  });
+  localStorage.setItem('wandor_token', data.access_token);
+  localStorage.setItem('wandor_role', 'institute_admin');
+  return data;
+}
+
 export function logout() {
   localStorage.removeItem('wandor_token');
   localStorage.removeItem('wandor_role');
@@ -233,12 +252,35 @@ export async function listInstituteTeachers() {
   return data;
 }
 
-export async function createTeacher(payload: { name: string; phone: string; password: string; is_owner?: boolean }) {
+export async function createTeacher(payload: {
+  name: string; phone: string; password: string; is_owner?: boolean; batches?: string[];
+}) {
+  // batches is ignored by the backend when is_owner is true - owners aren't batch-scoped.
   const { data } = await api.post('/institute/teachers', payload);
+  return data;
+}
+
+export async function setTeacherBatches(teacherId: string, batches: string[]) {
+  // Full replacement, not additive - send every batch this teacher should be
+  // assigned to, not just new ones.
+  const { data } = await api.put(`/institute/teachers/${teacherId}/batches`, { batches });
   return data;
 }
 
 export async function deleteTeacher(teacherId: string) {
   const { data } = await api.delete(`/institute/teachers/${teacherId}`);
+  return data;
+}
+
+// ---------- Students (institute-admin-facing - unscoped by batch, unlike a teacher) ----------
+export async function listInstituteStudents(batch?: string) {
+  const { data } = await api.get('/institute/students', { params: batch ? { batch } : {} });
+  return data;
+}
+
+export async function createInstituteStudent(payload: {
+  name: string; phone: string; parent_phone?: string; batch?: string; password: string;
+}) {
+  const { data } = await api.post('/institute/students', payload);
   return data;
 }

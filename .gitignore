@@ -9,6 +9,9 @@ backend/__pycache__/
 backend/**/__pycache__/
 *.pyc
 backend/uploads/
+*.db
+*.db-journal
+backend/.envdeactivate
 
 # --- Node (webapp) ---
 webapp/node_modules/

@@ -32,6 +32,9 @@ export default function Login() {
       <p className="hstack" style={{ justifyContent: 'center', marginTop: 16 }}>
         <Link to="/student-login">Student login</Link> · <Link to="/parent-login">Parent login</Link>
       </p>
+      <p className="hstack" style={{ justifyContent: 'center', marginTop: 4 }}>
+        <Link to="/teacher-signup">New teacher? Sign up</Link>
+      </p>
     </div>
   );
 }

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Student, Teacher
+from ..models import Student, Teacher, TeacherBatchAssignment
 from ..schemas import StudentCreate, StudentOut, SetStudentPassword, SetParentPin, StudentBulkImportResult
 from ..auth import get_current_teacher, hash_password
 
@@ -20,12 +20,34 @@ def _to_out(s: Student) -> StudentOut:
     )
 
 
+def _assert_can_add_to_batch(teacher: Teacher, batch: str | None, db: Session) -> None:
+    """Independent teachers (Teacher.institute_id is None) and institute owners can add
+    students to any batch freely. A non-owner teacher who belongs to an institute can
+    only add students to a batch their institute admin has explicitly assigned them to
+    (see PUT /institute/teachers/{id}/batches)."""
+    if teacher.institute_id is None or teacher.is_owner:
+        return
+    if not batch:
+        raise HTTPException(
+            status_code=403,
+            detail="You must specify a batch, and it must be one your institute has assigned you to",
+        )
+    assigned = db.query(TeacherBatchAssignment).filter(
+        TeacherBatchAssignment.teacher_id == teacher.id,
+        TeacherBatchAssignment.batch == batch,
+    ).first()
+    if not assigned:
+        raise HTTPException(status_code=403, detail=f"You're not assigned to batch '{batch}'")
+
+
 @router.post("", response_model=StudentOut)
 def create_student(
     payload: StudentCreate,
     db: Session = Depends(get_db),
     teacher: Teacher = Depends(get_current_teacher),
 ):
+    _assert_can_add_to_batch(teacher, payload.batch, db)
+
     existing = db.query(Student).filter(
         Student.institute_id == teacher.institute_id, Student.phone == payload.phone
     ).first()
@@ -164,13 +186,20 @@ async def bulk_import_students(
             skipped.append({"row": i, "phone": phone, "reason": "duplicate phone within this file"})
             continue
 
+        batch = row.get("batch") or None
+        try:
+            _assert_can_add_to_batch(teacher, batch, db)
+        except HTTPException as exc:
+            skipped.append({"row": i, "phone": phone, "reason": exc.detail})
+            continue
+
         password = row.get("password") or phone[-4:]
         student = Student(
             institute_id=teacher.institute_id,
             name=name,
             phone=phone,
             parent_phone=row.get("parent_phone") or None,
-            batch=row.get("batch") or None,
+            batch=batch,
             hashed_password=hash_password(password),
         )
         db.add(student)

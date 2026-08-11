@@ -4,6 +4,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
 import RoleSelect from './pages/RoleSelect';
 import Login from './pages/Login';
+import TeacherSignup from './pages/TeacherSignup';
+import InstituteSignup from './pages/InstituteSignup';
 import StudentLogin from './pages/StudentLogin';
 import ParentLogin from './pages/ParentLogin';
 import ParentDashboard from './pages/ParentDashboard';
@@ -63,6 +65,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/teacher-signup" element={<TeacherSignup />} />
+        <Route path="/institute-signup" element={<InstituteSignup />} />
         <Route path="/student-login" element={<StudentLogin />} />
         <Route path="/parent-login" element={<ParentLogin />} />
         <Route path="/parent" element={<ParentProtected><ParentDashboard /></ParentProtected>} />

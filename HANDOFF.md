@@ -467,3 +467,94 @@ clean on all edited files.
 
 
 
+
+---
+
+## Follow-up session: signup feature (teacher + institute self-signup, batch-scoped student adding)
+
+**Feature requested:** replace the login-only flow (all accounts previously created by
+direct DB insert or by another role) with real signup for teachers and institutes.
+Students and parents deliberately still have no self-signup path - only a teacher or
+institute admin can create those logins. Also: institute-affiliated non-owner teachers
+should only be able to add students to a batch they're explicitly assigned to;
+independent teachers and institute owners stay unrestricted.
+
+### Backend
+- `models.py` - new `TeacherBatchAssignment` table (`teacher_id`, `batch`). Independent
+  teachers (`Teacher.institute_id is None`) and owners (`Teacher.is_owner`) are never
+  scoped by it - the table only matters for a non-owner, institute-affiliated teacher.
+- `schemas.py` - `TeacherSignup`, `InstituteSignup`, `BatchAssignmentSet`; `TeacherCreate`
+  gained `batches: List[str] = []`, `TeacherOut` gained `batches: List[str]`.
+- `routers/auth.py`:
+  - `POST /auth/teacher-signup` - creates an INDEPENDENT teacher (`institute_id=None`,
+    `is_owner=False`). No institute field on the schema on purpose - a teacher can't
+    self-attach to an institute here; that binding only ever happens the other
+    direction (an institute admin adding them).
+  - `POST /auth/institute-signup` - creates the `Institute` row and activates its
+    password in one request. Replaces the old manual DB-insert +
+    `scripts/set_institute_password.py` bootstrap as the primary path in - the script
+    still works as an admin fallback but isn't the only way in anymore.
+- `routers/institute.py`:
+  - `POST /institute/teachers` now accepts `batches` and creates
+    `TeacherBatchAssignment` rows for non-owner teachers (ignored, not rejected, when
+    `is_owner=True`).
+  - `PUT /institute/teachers/{id}/batches` - full-replacement reassignment.
+  - `POST /institute/students`, `GET /institute/students` - institute admin can add/
+    list students directly, unscoped by batch (unlike a non-owner teacher).
+- `routers/students.py` - new `_assert_can_add_to_batch(teacher, batch, db)` helper,
+  called from both `create_student` and per-row inside `bulk_import_students` (bad-batch
+  rows are skipped-and-reported, same pattern as other bad rows, not a hard 403 for the
+  whole file).
+- `alembic/versions/0005_add_teacher_batch_assignments_and_signup.py` - new table only;
+  no column changes needed on existing tables (`Teacher.institute_id` and
+  `Institute.hashed_password` were already nullable, which is what makes independent
+  teachers and self-service institute signup possible without a schema change there).
+
+### Frontend
+- `api/client.ts` - `teacherSignup()`, `instituteSignup()`, `setTeacherBatches()`,
+  `listInstituteStudents()`, `createInstituteStudent()`; `createTeacher()`'s payload
+  type gained `batches?: string[]`.
+- `pages/TeacherSignup.tsx`, `pages/InstituteSignup.tsx` - new, same visual conventions
+  as `Login.tsx`/`InstituteLogin.tsx`.
+- `main.tsx` - `/teacher-signup`, `/institute-signup` routes.
+- `Login.tsx` / `InstituteLogin.tsx` - added "sign up" links.
+
+**Verified:**
+- Backend: `py_compile` clean on all edited files; full `FastAPI TestClient` script
+  covering the whole matrix - institute signup (+ duplicate-phone rejection),
+  independent teacher signup + free student-add to any batch, institute-created
+  non-owner teacher blocked from an unassigned batch and allowed into an assigned one,
+  institute owner teacher unrestricted, institute admin direct student-add, and batch
+  **reassignment taking effect immediately** (old batch blocked, new batch allowed
+  right after a `PUT .../batches` call). All assertions passed.
+- Frontend: `tsc --noEmit -p tsconfig.json` and `npm run build` both clean.
+- Not tested: real Postgres (migration 0005 only verified by inspection against the
+  0004 pattern, not run against a live DB), and none of the new UI has been visually
+  eyeballed in a browser.
+
+### Not done yet / open questions for next session
+- **Password change / settings feature is intentionally NOT part of this pass** -
+  explicitly deferred by the user to be designed together as its own "settings"
+  feature later. `SetStudentPassword`/`SetParentPin` already let a *teacher* reset a
+  *student's* password, but there's still no self-service "change my own password"
+  for teachers, students, or institute admins.
+- **No teacher-facing UI for `batches`** - `TeacherCreate`'s `batches` field and
+  `setTeacherBatches()` exist and are tested at the API level, but `InstituteDashboard.tsx`'s
+  "add teacher" form doesn't have a batch-picker input yet, and there's no UI to view/
+  edit an existing teacher's assigned batches. Next session should wire this in.
+- **No UI for institute-direct student adding** - `createInstituteStudent()` /
+  `listInstituteStudents()` exist as client functions only; `InstituteDashboard.tsx`
+  has no "add student" section yet (mirrors the teacher-side `ManageStudents.tsx` gap
+  that existed for institute students specifically).
+- **Independent teacher who later joins an institute isn't reconciled** - if a teacher
+  signs up independently (`institute_id=None`) and an institute admin later wants to
+  bring them on board, there's no merge/claim flow - the admin would have to create a
+  brand-new `Teacher` row via `POST /institute/teachers` with a different phone,
+  leaving the original independent account orphaned. Flagged, not solved.
+- **Batch names are free-text strings everywhere** (`ClassSession.batch`,
+  `Student.batch`, `TeacherBatchAssignment.batch`) - a typo when assigning a teacher to
+  "Class 10A" vs typing "class 10 a" elsewhere silently creates a mismatch with no
+  validation catching it. Worth considering a real `Batch` model with an id, at some
+  point, instead of matching on raw strings.
+- No self-signup for students/parents was added, by design, per the user's explicit
+  requirement.
