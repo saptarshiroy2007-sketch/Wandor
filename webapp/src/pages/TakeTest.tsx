@@ -7,6 +7,8 @@ import { LockTask } from '../plugins/lockTask';
  * Handles both test types. For 'document' type, this is the screen that triggers
  * the native lock (via LockTask plugin) and listens for leave-attempt events,
  * forwarding each one to the backend flag endpoint. For 'mcq' it's a normal form.
+ *
+ * No Layout wrapper — spec: full-bleed, no nav, just the question/OMR/progress.
  */
 export default function TakeTest() {
   const { testId } = useParams();
@@ -41,37 +43,49 @@ export default function TakeTest() {
     setSubmitted({ score: result.score, total: result.total });
   }
 
-  if (!attempt) return <div className="page" style={{ paddingTop: '20vh', textAlign: 'center' }}><p>Loading test…</p></div>;
+  if (!attempt) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 24 }}>
+        <p>Loading test…</p>
+      </div>
+    );
+  }
 
   if (submitted) {
     return (
-      <div className="page" style={{ paddingTop: '20vh', textAlign: 'center' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 24, textAlign: 'center' }}>
         <h1>Submitted</h1>
-        <p style={{ fontSize: 20, color: 'var(--ink)' }}>Score: {submitted.score}/{submitted.total}</p>
+        <p style={{ fontSize: 20, color: 'var(--ink)', marginTop: 8 }}>
+          Score: {submitted.score}/{submitted.total}
+        </p>
       </div>
     );
   }
 
   if (attempt.type === 'document') {
     return (
-      <div className="page" style={{ maxWidth: '100%', padding: 12 }}>
+      <div style={{ padding: 12 }}>
         <div className="row" style={{ marginBottom: 8 }}>
           <h1>Locked test</h1>
           {flagCount > 0 && <span className="badge badge-danger">⚠ logged {flagCount}x</span>}
         </div>
-        <iframe src={attempt.document_url} style={{ width: '100%', height: '78vh', border: '1px solid var(--rule)', borderRadius: 3 }} title="Test document" />
+        <iframe
+          src={attempt.document_url}
+          style={{ width: '100%', height: 'calc(100vh - 100px)', border: '1px solid var(--paper-line)' }}
+          title="Test document"
+        />
         <button style={{ marginTop: 12 }} onClick={submitAndFinish}>Submit</button>
       </div>
     );
   }
 
   return (
-    <div className="page">
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '24px 16px 48px' }}>
       <h1>MCQ test</h1>
       <div className="stack">
         {attempt.questions?.map((q: any, i: number) => (
           <div className="card" key={q.id}>
-            <p style={{ color: 'var(--ink)', fontWeight: 500 }}>{i + 1}. {q.text}</p>
+            <p style={{ color: 'var(--ink)', fontWeight: 600, marginBottom: 8 }}>{i + 1}. {q.text}</p>
             <div className="stack">
               {['a', 'b', 'c', 'd'].map((opt) => (
                 <label key={opt} className="omr-option" htmlFor={`${q.id}-${opt}`}>
@@ -94,3 +108,5 @@ export default function TakeTest() {
     </div>
   );
 }
+
+

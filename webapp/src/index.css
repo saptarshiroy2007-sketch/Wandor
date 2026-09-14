@@ -1,49 +1,78 @@
 /*
-  Design direction: "the question paper" — grounded in the product's actual core
-  (Wandor runs real MCQ tests), not decoration bolted on afterward. Pale exam-paper
-  background, exam-board ink-blue as the working accent, a highlighter-yellow used
-  ONLY for flags that need attention (overdue fees, weak questions, unmarked
-  attendance) - never decoratively. Signature element: the OMR bubble - a real exam
-  answer-sheet fill-in-the-circle control, used everywhere a person makes a binary or
-  multiple choice (attendance present/absent, MCQ answers), not just on the test page.
-  Brand mark: "W" set in Castellar (Roman inscriptional capitals) - gravitas of an
-  exam-board seal. Castellar isn't on Google Fonts (Monotype-owned, not freely
-  redistributable) - it renders correctly for the many people who already have it
-  system-installed (bundled with Windows/Office), and falls back to a small-caps serif
-  that apes the same inscriptional-capital feel for everyone else.
+  Design direction: "results board" — grounded in Indian coaching-center visual culture.
+  Results boards, topper ribbons, stamped mark sheets, bold hoarding signage. Extends
+  the "question paper" theme; red moves from alert-only to the structural accent color.
+
+  Approved: sections 1 (tokens/type), 2 (nav shell), 4 (components), 5 (role nav).
+  Section 3 (content layout) is explicitly rejected/pending rework — .page left as-is.
+
+  Dark-mode red text rule (resolved in spec): red text on dark backgrounds must be
+  ≥18.66px bold OR 24px regular to pass WCAG AA (~4.2:1 ratio). Never use dark-mode
+  red for captions or small inline text. Enforced via comments at usage sites below.
 */
+
+/* ============================================================
+   TOKENS
+   ============================================================ */
 :root {
-  --paper: #eeece1;
-  --surface: #fdfdf9;
-  --ink: #1a1a17;
-  --muted: #6b6656;
-  --rule: #cfc9b6;
+  /* Core palette */
+  --paper:       #eee9e0;
+  --ink:         #141414;
+  --signal-red:  #c1272d;
+  --ink-blue:    #1f3f8f;
+  --surface:     #f7f4ec;
+  --paper-line:  #d8d2c4;
+  --muted:       #6b6656;
 
-  --ink-blue: #1f3f8f;
-  --ink-blue-deep: #16306e;
-  --highlight: #f2c94c;
-  --highlight-ink: #4a3a00;
-  --stamp-red: #ab3a2c;
+  /* Derived */
+  --accent:      var(--signal-red);
+  --accent-ink:  #ffffff;
+  --radius:      0;
 
-  --accent: var(--ink-blue);
-  --accent-ink: #ffffff;
-  --radius: 3px;
+  /* Nav: always dark in both light and dark mode per spec.
+     Do NOT use var(--ink) here — it would invert in dark mode. */
+  --nav-bg:            #141414;
+  --nav-text:          rgba(255, 255, 255, 0.62);
+  --nav-text-active:   #ffffff;
+  --nav-text-hover:    rgba(255, 255, 255, 0.88);
 
-  --font-display: 'Castellar', 'Cinzel', Georgia, 'Times New Roman', serif;
+  /* Backward-compat aliases — old names still resolve correctly */
+  --rule:           var(--paper-line);
+  --stamp-red:      var(--signal-red);
+  --ink-blue-deep:  #16306e;
+  --highlight:      #f2c94c;
+  --highlight-ink:  #4a3a00;
+
+  /* Typography */
+  --font-display: 'Cinzel', Georgia, 'Times New Roman', serif;
   --font-heading: 'Archivo', 'Arial Narrow', sans-serif;
-  --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+  --font-body:    'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono:    'IBM Plex Mono', 'Courier New', monospace;
 
   font-family: var(--font-body);
 }
 
+/* Dark mode overrides — toggled via data-theme="dark" on <html> (set by Settings page;
+   applied before React loads in index.html script to prevent flash). */
+[data-theme="dark"] {
+  --paper:      #17140f;
+  --ink:        #ece7da;
+  --signal-red: #d6473f;   /* ≥18.66px bold only on dark bg — see rule above */
+  --ink-blue:   #5b7fd6;
+  --surface:    #221d15;
+  --paper-line: #3a352b;
+  --muted:      #a39c89;
+}
+
+/* ============================================================
+   RESET + BASE
+   ============================================================ */
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
   background: var(--paper);
-  /* faint ruled-paper texture - horizontal guideline rows, like exam answer sheets */
-  background-image: linear-gradient(var(--rule) 1px, transparent 1px);
+  background-image: linear-gradient(var(--paper-line) 1px, transparent 1px);
   background-size: 100% 32px;
   background-attachment: local;
   color: var(--ink);
@@ -53,58 +82,69 @@ body {
 
 #root { min-height: 100vh; }
 
-h1, h2, h3 { font-family: var(--font-heading); font-weight: 700; letter-spacing: -0.005em; margin: 0 0 12px; color: var(--ink); }
-h1 { font-size: 24px; text-transform: uppercase; letter-spacing: 0.01em; }
+/* ============================================================
+   TYPOGRAPHY
+   ============================================================ */
+h1, h2, h3 {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  margin: 0 0 12px;
+  color: var(--ink);
+}
+h1 {
+  font-size: 24px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
 h2 {
-  font-size: 12px;
+  font-size: 11px;
   font-family: var(--font-mono);
   color: var(--muted);
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 500;
-  margin-top: 30px;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  margin-top: 32px;
   padding-bottom: 6px;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--paper-line);
 }
 p { margin: 0 0 8px; color: var(--muted); }
 
 a { color: var(--ink-blue); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
+/* ============================================================
+   LAYOUT HELPERS
+   ============================================================ */
+
+/* Content column — max-width pending section-3 rework */
 .page {
   max-width: 640px;
   margin: 0 auto;
-  padding: 24px 16px 64px;
+  padding: 24px 16px 88px; /* 88px bottom clears phone tab bar */
 }
 
-/* Answer-sheet card: crisp white "sheet" sitting on the ruled paper background,
-   sharp corners (no soft border-radius - this is an official document, not an app card). */
+.row   { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.hstack { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ============================================================
+   CARD
+   ============================================================ */
 .card {
   position: relative;
   background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  border: 1px solid var(--paper-line);
+  border-radius: 0; /* hard edges throughout */
   padding: 16px;
   margin-bottom: 14px;
 }
 
-.row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-
-.stack { display: flex; flex-direction: column; gap: 8px; }
-.hstack { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-
-/* "Instructions box" - the boxed header every real exam paper opens with
-   ("Instructions: Fill only ONE bubble per question..."). Used for page intros
-   and empty states instead of a plain heading + paragraph - the box itself
-   signals "read this before you act." */
+/* ============================================================
+   INSTRUCTIONS BOX
+   ============================================================ */
 .instructions-box {
   border: 1.5px solid var(--ink);
-  border-radius: var(--radius);
+  border-radius: 0;
   padding: 12px 14px;
   margin-bottom: 20px;
   background: var(--surface);
@@ -125,58 +165,112 @@ a:hover { text-decoration: underline; }
 }
 .instructions-box p { color: var(--ink); margin: 0; font-size: 14px; }
 
+/* ============================================================
+   FORMS
+   ============================================================ */
 input, select, textarea {
   width: 100%;
   padding: 9px 11px;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  border: 1px solid var(--paper-line);
+  border-radius: 0;
   background: var(--surface);
   color: var(--ink);
   font-size: 14px;
   font-family: var(--font-body);
 }
-input:focus, select:focus, textarea:focus { outline: 2px solid var(--ink-blue); outline-offset: -1px; }
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--signal-red);
+  outline-offset: -1px;
+}
 
-label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); }
-
+label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: var(--font-mono);
+}
 form.stack label { margin-top: 4px; }
 
+/* ============================================================
+   BUTTONS
+   Primary = signal-red fill.
+   Danger = red outline (keeps it distinct from primary).
+   Ghost = transparent with paper-line border.
+   ============================================================ */
 button, .btn {
   appearance: none;
-  border: 1px solid var(--ink-blue);
-  background: var(--ink-blue);
-  color: var(--accent-ink);
+  border: 1.5px solid var(--signal-red);
+  background: var(--signal-red);
+  color: #ffffff;
   padding: 9px 16px;
-  border-radius: var(--radius);
+  border-radius: 0;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   font-family: var(--font-heading);
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
   cursor: pointer;
+  min-height: 44px; /* WCAG 2.5.5 touch target */
+  transition: filter 0.1s;
 }
-button:hover { background: var(--ink-blue-deep); border-color: var(--ink-blue-deep); }
-button:disabled { opacity: 0.4; cursor: not-allowed; }
-button:focus-visible, .btn:focus-visible, a:focus-visible, input:focus-visible {
-  outline: 2px solid var(--highlight);
+button:hover { filter: brightness(0.86); }
+button:disabled { opacity: 0.36; cursor: not-allowed; filter: none; }
+
+button:focus-visible, .btn:focus-visible {
+  outline: 2px solid var(--signal-red);
+  outline-offset: 2px;
+}
+a:focus-visible, input:focus-visible {
+  outline: 2px solid var(--signal-red);
   outline-offset: 2px;
 }
 
+/* Solid ink (secondary / neutral confirm) */
+.btn-secondary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #ffffff;
+}
+.btn-secondary:hover { filter: brightness(1.35); }
+
+/* Ghost */
 .btn-ghost {
   background: transparent;
   color: var(--ink);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--paper-line);
 }
-.btn-danger { background: var(--stamp-red); border-color: var(--stamp-red); }
-.btn-sm { padding: 5px 10px; font-size: 13px; }
+.btn-ghost:hover { background: var(--paper-line); filter: none; }
 
+/* Danger — outline, fills on hover so it looks destructive only when hovered */
+.btn-danger {
+  background: transparent;
+  border: 1.5px solid var(--signal-red);
+  color: var(--signal-red);
+}
+.btn-danger:hover { background: var(--signal-red); color: #ffffff; filter: none; }
+
+.btn-sm { padding: 5px 10px; font-size: 13px; min-height: 36px; }
+
+/* ============================================================
+   TABLE
+   ============================================================ */
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--rule); }
-th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--paper-line); }
+th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: var(--font-mono);
+}
 td { font-family: var(--font-mono); font-size: 13px; }
 
-/* Status badge - kept quiet/neutral by default. Only the flagged/urgent state
-   (badge-flag) borrows the highlighter-yellow, so the highlight color stays
-   meaningful instead of decorative. */
+/* ============================================================
+   BADGES
+   ============================================================ */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -184,30 +278,31 @@ td { font-family: var(--font-mono); font-size: 13px; }
   min-width: 26px;
   height: 22px;
   padding: 0 9px;
-  border-radius: var(--radius);
+  border-radius: 0;
   font-size: 10px;
   font-family: var(--font-mono);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--ink-blue-deep);
+  color: var(--ink-blue);
   border: 1px solid var(--ink-blue);
-  background: #eaf0fb;
+  background: transparent;
 }
-.badge-muted { color: var(--muted); border-color: var(--rule); background: var(--paper); }
-.badge-danger { color: #ffffff; border-color: var(--stamp-red); background: var(--stamp-red); }
-/* The ONE place highlighter-yellow appears as a fill - genuinely needs eyes on it:
-   overdue fees, weak questions, unmarked attendance. */
-.badge-flag { color: var(--highlight-ink); border-color: #c9a227; background: var(--highlight); }
+.badge-muted  { color: var(--muted); border-color: var(--paper-line); }
+.badge-danger { color: #ffffff; border-color: var(--signal-red); background: var(--signal-red); }
+.badge-flag   { color: var(--highlight-ink); border-color: #c9a227; background: var(--highlight); }
 
-.error { color: var(--stamp-red); font-size: 13px; margin: 4px 0 0; font-family: var(--font-mono); }
+/* ============================================================
+   UTILITIES
+   ============================================================ */
+.error { color: var(--signal-red); font-size: 13px; margin: 4px 0 0; font-family: var(--font-mono); }
 .empty { color: var(--muted); font-size: 14px; padding: 12px 0; font-style: italic; }
 
-/* ---------- Signature element: the OMR bubble ---------- */
-/* A real answer-sheet fill-in-the-circle control. Wraps a native radio/checkbox for
-   accessibility (keyboard nav, screen readers) while fully re-skinning its appearance -
-   the native input is visually hidden but still focusable and operable.
-   Usage: <label class="omr-option"><input type="radio" .../><span class="omr-bubble"></span>Label text</label> */
+/* ============================================================
+   OMR BUBBLE
+   The signature element carried from the question-paper theme.
+   Fill color updated from ink-blue to signal-red.
+   ============================================================ */
 .omr-option {
   display: flex;
   align-items: center;
@@ -230,84 +325,201 @@ td { font-family: var(--font-mono); font-size: 13px; }
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  border: 2px solid var(--ink-blue);
+  border: 2px solid var(--paper-line);
   background: var(--surface);
   position: relative;
-  transition: background 0.1s ease;
+  transition: border-color 0.1s ease;
 }
 .omr-bubble::after {
   content: '';
   position: absolute;
   inset: 3px;
   border-radius: 50%;
-  background: var(--ink-blue);
+  background: var(--signal-red);
   transform: scale(0);
   transition: transform 0.12s ease;
 }
-.omr-option input:checked + .omr-bubble::after { transform: scale(1); }
-.omr-option input:focus-visible + .omr-bubble { outline: 2px solid var(--highlight); outline-offset: 2px; }
-.omr-option:hover .omr-bubble { border-color: var(--ink-blue-deep); }
-/* Squared variant for present/absent-style binary marks (attendance), so it doesn't
-   read as "pick one of many" like the round MCQ bubble does. */
-.omr-bubble.square { border-radius: 4px; }
-.omr-bubble.square::after { border-radius: 2px; }
+.omr-option input:checked + .omr-bubble              { border-color: var(--signal-red); }
+.omr-option input:checked + .omr-bubble::after       { transform: scale(1); }
+.omr-option input:focus-visible + .omr-bubble        { outline: 2px solid var(--signal-red); outline-offset: 2px; }
+.omr-option:hover .omr-bubble                        { border-color: var(--ink); }
+/* Square variant for present/absent binary marks (attendance) */
+.omr-bubble.square        { border-radius: 2px; }
+.omr-bubble.square::after { border-radius: 1px; }
 
-/* Nav: exam-board letterhead - the Castellar/serif wordmark is the one place the
-   display face appears; everything else in the nav stays in the working grotesk. */
+/* ============================================================
+   NAV SHELL
+   Spec: solid --ink top bar on desktop, bottom tab bar on phone.
+   Nav block is always dark; it does not flip in dark mode.
+   ============================================================ */
 .nav {
-  background: var(--surface);
-  padding: 12px 20px;
-  margin-bottom: 8px;
-  border-bottom: 3px solid var(--ink);
+  background: var(--nav-bg);
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  position: sticky;
+  top: 0;
+  z-index: 200;
 }
+
 .nav-inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  max-width: 640px;
-  margin: 0 auto;
   width: 100%;
+  gap: 12px;
 }
-.nav-links { display: flex; gap: 2px; flex-wrap: wrap; }
-.nav-links a, .nav-links .active {
-  padding: 6px 12px;
-  border-radius: var(--radius);
-  font-size: 13px;
-  font-family: var(--font-heading);
-  font-weight: 600;
-  color: var(--muted);
-  border-bottom: 2px solid transparent;
-}
-.nav-links .active { color: var(--ink-blue); border-bottom: 2px solid var(--ink-blue); }
-.nav-links a:hover { text-decoration: none; color: var(--ink); }
-.nav-inner .btn-ghost { color: var(--muted); border-color: var(--rule); }
-.nav-inner .btn-ghost:hover { background: var(--paper); }
 
-/* Brand mark - "W" in Castellar, sitting in a thin ink-blue seal ring like an
-   exam-board stamp. Falls back to a small-caps serif "W" for anyone without
-   Castellar installed, so it never looks broken. */
+/* Brand */
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  text-decoration: none;
+  flex-shrink: 0;
 }
+.brand:hover { text-decoration: none; }
+
 .brand-mark {
   font-family: var(--font-display);
-  font-size: 22px;
+  font-size: 19px;
   line-height: 1;
-  color: var(--ink-blue);
+  color: var(--signal-red);
   width: 34px;
   height: 34px;
-  border: 1.5px solid var(--ink-blue);
+  border: 1.5px solid var(--signal-red);
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 .brand-word {
   font-family: var(--font-display);
-  font-variant: small-caps;
-  font-size: 19px;
-  letter-spacing: 0.03em;
-  color: var(--ink);
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  color: var(--nav-text-active);
+  font-weight: 400;
 }
+
+/* Desktop nav links — flex row in the top bar */
+.nav-links {
+  display: flex;
+  align-items: stretch;
+  height: 56px;
+  flex: 1;
+  justify-content: center;
+}
+.nav-links a, .nav-tab-disabled {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-size: 12px;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nav-text);
+  border-bottom: 3px solid transparent;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.1s;
+}
+.nav-links a:hover { color: var(--nav-text-hover); text-decoration: none; }
+.nav-links a.active { color: var(--nav-text-active); border-bottom-color: var(--signal-red); }
+.nav-tab-disabled {
+  color: rgba(255, 255, 255, 0.22);
+  cursor: not-allowed;
+}
+
+/* Logout in top bar — distinct from page buttons */
+.nav-logout {
+  appearance: none;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--nav-text);
+  padding: 5px 12px;
+  font-size: 11px;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  min-height: 32px;
+  border-radius: 0;
+  flex-shrink: 0;
+  filter: none;
+}
+.nav-logout:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.38);
+  color: #fff;
+  filter: none;
+}
+
+/* ============================================================
+   BOTTOM TAB BAR — phone only (<640px)
+   ============================================================ */
+.bottom-tab-bar {
+  display: none; /* visible only on phone via media query below */
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: var(--nav-bg);
+  border-top: 2px solid var(--signal-red);
+  padding-bottom: env(safe-area-inset-bottom, 0); /* iOS home indicator */
+}
+.bottom-tab-bar-inner { display: flex; width: 100%; }
+
+.bottom-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 2px 10px;
+  font-size: 10px;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--nav-text);
+  text-decoration: none;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  min-height: 52px; /* WCAG touch target */
+  appearance: none;
+  border-top: 3px solid transparent;
+  transition: color 0.1s;
+}
+.bottom-tab:hover:not(.disabled) { color: var(--nav-text-hover); filter: none; }
+.bottom-tab.active {
+  color: var(--signal-red);
+  border-top-color: var(--signal-red);
+}
+.bottom-tab.disabled {
+  color: rgba(255, 255, 255, 0.20);
+  cursor: not-allowed;
+}
+
+/* ============================================================
+   RESPONSIVE BREAKPOINTS
+   ============================================================ */
+@media (max-width: 639px) {
+  /* Collapse wordmark to just the mark on phone */
+  .brand-word { display: none; }
+  /* Hide desktop nav links */
+  .nav-links  { display: none; }
+  /* Show bottom tab bar */
+  .bottom-tab-bar { display: block; }
+}
+
+@media (min-width: 640px) {
+  /* On desktop, no bottom tab bar; reduce bottom page padding */
+  .page { padding-bottom: 32px; }
+}
+
+

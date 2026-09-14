@@ -68,6 +68,24 @@ export function getRole(): 'teacher' | 'student' | 'parent' | 'institute_admin' 
   return (localStorage.getItem('wandor_role') as 'teacher' | 'student' | 'parent' | 'institute_admin' | null) ?? null;
 }
 
+// ---------- Theme toggle — wired to [data-theme="dark"] on <html> ----------
+// Call setTheme(true) from the Settings page when the user flips the dark-mode switch.
+// The preference is stored in localStorage so index.html's inline script can apply it
+// before React hydrates, preventing the white flash on dark-mode users.
+export function setTheme(dark: boolean): void {
+  if (dark) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    localStorage.setItem('wandor_theme', 'dark');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('wandor_theme', 'light');
+  }
+}
+
+export function isDarkTheme(): boolean {
+  return localStorage.getItem('wandor_theme') === 'dark';
+}
+
 export async function scheduleClass(payload: {
   batch: string; subject: string; start_time: string; end_time: string;
 }) {
