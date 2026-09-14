@@ -17,6 +17,7 @@ class Token(BaseModel):
 class StudentLogin(BaseModel):
     phone: str
     password: str
+    institute_id: Optional[str] = None  # optional: scope login to a specific institute to avoid cross-tenant collision when two institutes share a student phone
 
 
 class ParentLogin(BaseModel):
@@ -25,6 +26,7 @@ class ParentLogin(BaseModel):
     A parent with two kids at the institute just logs in twice with each child's phone."""
     student_phone: str
     pin: str
+    institute_id: Optional[str] = None  # optional: same cross-tenant scoping as StudentLogin
 
 
 class InstituteLogin(BaseModel):
@@ -186,17 +188,32 @@ class ClassOut(BaseModel):
 
 
 # ---------- Tests ----------
+class QuestionIn(BaseModel):
+    """One MCQ question as authored by the teacher. Validated server-side:
+    correct_option must be one of a/b/c/d."""
+    text: str
+    option_a: str
+    option_b: str
+    option_c: str
+    option_d: str
+    correct_option: str  # "a" / "b" / "c" / "d"
+
+
 class TestCreateAuto(BaseModel):
+    """Teacher-authored MCQ test — the teacher writes every question directly.
+    LLM auto-generation was removed; this now accepts the questions payload instead
+    of topic/num_questions (see follow-up session in HANDOFF.md)."""
     title: str
-    topic: str
-    num_questions: int = 10
     duration_minutes: int = 30
+    batch: Optional[str] = None  # None = visible to all students in the institute; set to restrict to one batch
+    questions: List[QuestionIn]
 
 
 class TestCreateDocument(BaseModel):
     title: str
     document_url: str
     duration_minutes: int = 30
+    batch: Optional[str] = None  # None = visible to all students in the institute; set to restrict to one batch
 
 
 class AnswerSubmit(BaseModel):
@@ -224,7 +241,7 @@ class TestOut(BaseModel):
     title: str
     test_type: str
     duration_minutes: int
-    topic: Optional[str] = None
+    batch: Optional[str] = None  # None = all-institute-wide; set = batch-restricted
 
     class Config:
         from_attributes = True

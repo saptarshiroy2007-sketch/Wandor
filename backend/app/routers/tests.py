@@ -5,13 +5,17 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Test, TestType, Question, TestAttempt, Student
-from ..schemas import TestCreateAuto, TestCreateDocument, TestSubmit, FlagEvent, TestOut, TestAnalytics, QuestionStat
+from ..schemas import (
+    TestCreateAuto, TestCreateDocument, TestSubmit, FlagEvent,
+    TestOut, TestAnalytics, QuestionStat,
+)
 from ..auth import get_current_teacher, get_current_student
-from ..services.mcq_gen import generate_mcqs
 from ..services.notify import notify
 from ..models import Teacher, NotificationLog
 
 router = APIRouter(prefix="/tests", tags=["tests"])
+
+VALID_OPTIONS = {"a", "b", "c", "d"}
 
 
 # ---------- List tests ----------
@@ -19,14 +23,24 @@ router = APIRouter(prefix="/tests", tags=["tests"])
 def list_tests(db: Session = Depends(get_db), teacher: Teacher = Depends(get_current_teacher)):
     """Teacher-facing - every test created for their institute, newest first."""
     tests = db.query(Test).filter(Test.institute_id == teacher.institute_id).order_by(Test.id.desc()).all()
-    return [TestOut(id=t.id, title=t.title, test_type=t.test_type.value, duration_minutes=t.duration_minutes, topic=t.topic) for t in tests]
+    return [TestOut(id=t.id, title=t.title, test_type=t.test_type.value, duration_minutes=t.duration_minutes, batch=t.batch) for t in tests]
 
 
 @router.get("/available", response_model=List[TestOut])
 def list_available_tests(db: Session = Depends(get_db), student: Student = Depends(get_current_student)):
-    """Student-facing - tests they can start, scoped to their own institute."""
-    tests = db.query(Test).filter(Test.institute_id == student.institute_id).order_by(Test.id.desc()).all()
-    return [TestOut(id=t.id, title=t.title, test_type=t.test_type.value, duration_minutes=t.duration_minutes, topic=t.topic) for t in tests]
+    """Student-facing - tests they can start, scoped to their own institute AND batch.
+    Tests with batch=None are visible to all students (institute-wide). Tests with a
+    batch set are only visible to students in that batch. This fixes the bug where every
+    student in an institute saw every test regardless of batch."""
+    from sqlalchemy import or_, and_
+    tests = db.query(Test).filter(
+        Test.institute_id == student.institute_id,
+        or_(
+            Test.batch.is_(None),
+            and_(student.batch.isnot(None), Test.batch == student.batch) if student.batch else Test.batch.is_(None),
+        )
+    ).order_by(Test.id.desc()).all()
+    return [TestOut(id=t.id, title=t.title, test_type=t.test_type.value, duration_minutes=t.duration_minutes, batch=t.batch) for t in tests]
 
 
 WEAK_QUESTION_THRESHOLD_PCT = 50.0  # a question <50% of students get right is flagged "weak" - either badly worded or genuinely hard, worth the teacher's attention either way
@@ -103,24 +117,41 @@ def test_analytics(test_id: str, db: Session = Depends(get_db), teacher: Teacher
 @router.post("/mcq")
 def create_mcq_test(payload: TestCreateAuto, db: Session = Depends(get_db),
                      teacher: Teacher = Depends(get_current_teacher)):
+    """Creates a teacher-authored MCQ test. The teacher supplies every question, option,
+    and correct answer directly — no LLM generation. Server validates that correct_option
+    is one of a/b/c/d for each question; any invalid question causes a 400 rather than
+    silently storing a bad correct answer."""
+    for i, q in enumerate(payload.questions):
+        if q.correct_option.lower() not in VALID_OPTIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Question {i+1}: correct_option must be one of a, b, c, d (got '{q.correct_option}')",
+            )
+
     test = Test(
         institute_id=teacher.institute_id,
         title=payload.title,
         test_type=TestType.mcq_auto,
         duration_minutes=payload.duration_minutes,
-        topic=payload.topic,
-        num_questions=payload.num_questions,
+        batch=payload.batch,
     )
     db.add(test)
     db.commit()
     db.refresh(test)
 
-    generated = generate_mcqs(payload.topic, payload.num_questions)
-    for q in generated:
-        db.add(Question(test_id=test.id, **q))
+    for q in payload.questions:
+        db.add(Question(
+            test_id=test.id,
+            text=q.text,
+            option_a=q.option_a,
+            option_b=q.option_b,
+            option_c=q.option_c,
+            option_d=q.option_d,
+            correct_option=q.correct_option.lower(),
+        ))
     db.commit()
 
-    return {"test_id": test.id, "questions_generated": len(generated)}
+    return {"test_id": test.id, "questions_created": len(payload.questions)}
 
 
 @router.post("/document")
@@ -134,11 +165,13 @@ def create_document_test(payload: TestCreateDocument, db: Session = Depends(get_
         test_type=TestType.document_locked,
         duration_minutes=payload.duration_minutes,
         document_url=payload.document_url,
+        batch=payload.batch,
     )
     db.add(test)
     db.commit()
     db.refresh(test)
     return {"test_id": test.id}
+
 
 
 # ---------- Student: take tests ----------

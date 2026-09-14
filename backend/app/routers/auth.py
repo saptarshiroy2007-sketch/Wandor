@@ -71,8 +71,16 @@ def student_login(payload: StudentLogin, db: Session = Depends(get_db)):
     """Students log in with phone + the PIN/password their teacher set when adding them
     (see POST /students). If a student was added before login existed and has no
     hashed_password yet, this correctly rejects until a teacher sets one via
-    POST /students/{id}/set-password."""
-    student = db.query(Student).filter(Student.phone == payload.phone).first()
+    POST /students/{id}/set-password.
+
+    Lenient cross-tenant fix: if institute_id is provided in the payload, the query is
+    scoped to that institute so two students at two different institutes sharing a phone
+    number don't collide. If institute_id is omitted, the old single-query behaviour
+    applies (first DB match wins), which is fine for single-institute deployments."""
+    q = db.query(Student).filter(Student.phone == payload.phone)
+    if payload.institute_id:
+        q = q.filter(Student.institute_id == payload.institute_id)
+    student = q.first()
     if not student or not student.hashed_password or not verify_password(payload.password, student.hashed_password):
         raise HTTPException(status_code=401, detail="Wrong phone number or password")
     token = create_access_token(student.id, role="student")
@@ -84,9 +92,12 @@ def parent_login(payload: ParentLogin, db: Session = Depends(get_db)):
     """Parents log in with their child's phone + the parent PIN a teacher set via
     POST /students/{id}/set-parent-pin. Same not-yet-activated handling as student
     login: if parent_pin_hash is null, this correctly rejects until a teacher sets one.
-    NOTE: student.phone is only unique within an institute (not globally), same caveat
-    that applies to student-login - see student_login()'s note above."""
-    student = db.query(Student).filter(Student.phone == payload.student_phone).first()
+    NOTE: student.phone is only unique within an institute (not globally) - provide
+    institute_id in the payload to avoid cross-tenant collision (see student_login)."""
+    q = db.query(Student).filter(Student.phone == payload.student_phone)
+    if payload.institute_id:
+        q = q.filter(Student.institute_id == payload.institute_id)
+    student = q.first()
     if not student or not student.parent_pin_hash or not verify_password(payload.pin, student.parent_pin_hash):
         raise HTTPException(status_code=401, detail="Wrong phone number or PIN")
     token = create_access_token(student.id, role="parent")

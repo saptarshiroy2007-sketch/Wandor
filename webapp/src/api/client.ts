@@ -206,15 +206,24 @@ export async function myChildTests() {
 }
 
 // ---------- Tests ----------
+export interface QuestionIn {
+  text: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  correct_option: 'a' | 'b' | 'c' | 'd';
+}
+
 export async function createMcqTest(payload: {
-  title: string; topic: string; num_questions: number; duration_minutes: number;
+  title: string; duration_minutes: number; batch?: string; questions: QuestionIn[];
 }) {
   const { data } = await api.post('/tests/mcq', payload);
-  return data; // { test_id, questions_generated }
+  return data; // { test_id, questions_created }
 }
 
 export async function createDocumentTest(payload: {
-  title: string; document_url: string; duration_minutes: number;
+  title: string; document_url: string; duration_minutes: number; batch?: string;
 }) {
   const { data } = await api.post('/tests/document', payload);
   return data; // { test_id }

@@ -131,8 +131,7 @@ class Test(Base):
     test_type = Column(Enum(TestType), nullable=False)
     duration_minutes = Column(Integer, nullable=False)
     document_url = Column(String, nullable=True)  # for document_locked type - PDF/image in S3/GCS
-    topic = Column(String, nullable=True)  # for mcq_auto - what to generate questions on
-    num_questions = Column(Integer, default=10)  # for mcq_auto
+    batch = Column(String, nullable=True)  # None = all students in institute see this; set = only that batch sees it
 
     questions = relationship("Question", back_populates="test")
 

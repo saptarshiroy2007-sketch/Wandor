@@ -25,8 +25,6 @@ class Settings(BaseSettings):
     fee_reminder_days_before: int = 3  # send a reminder once a fee's due_date is within this many days
     fee_reminder_hour: int = 9  # server-local hour (0-23) the daily job fires
 
-    anthropic_api_key: str = ""  # used for real MCQ generation - falls back to placeholder stub if empty
-
     storage_backend: str = "local"  # "local" or "s3"
     upload_dir: str = "uploads"  # used when storage_backend == "local"
     s3_bucket: str = ""

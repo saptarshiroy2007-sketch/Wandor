@@ -26,7 +26,12 @@ function isLoggedIn() {
 }
 
 function Protected({ children }: { children: React.ReactNode }) {
-  return isLoggedIn() ? <>{children}</> : <Navigate to="/login" />;
+  // Check both logged-in AND teacher role - a student/parent/institute_admin token being
+  // present doesn't grant access to teacher-only pages. The backend rejects their API
+  // calls anyway (get_current_teacher), but this redirect avoids a confusing half-loaded
+  // page before the first API call fails.
+  if (!isLoggedIn() || getRole() !== 'teacher') return <Navigate to="/login" />;
+  return <>{children}</>;
 }
 
 // Test-taking is student-only - a teacher token being present doesn't grant access here,
