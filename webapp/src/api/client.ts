@@ -80,6 +80,11 @@ export async function cancelClass(classId: string, reason?: string) {
   return data;
 }
 
+export async function rescheduleClass(classId: string, payload: { start_time: string; end_time: string; reason?: string }) {
+  const { data } = await api.post(`/classes/${classId}/reschedule`, payload);
+  return data;
+}
+
 export async function listClasses() {
   const { data } = await api.get('/classes');
   return data;

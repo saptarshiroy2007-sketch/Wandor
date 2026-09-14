@@ -623,3 +623,71 @@ looks.
   the app (if any exists elsewhere, e.g. role toggles) wasn't audited for consistency.
 - No favicon/app-icon file generated from the new "W" mark yet - `.brand-mark` is
   in-page only, `index.html`'s `<link rel="icon">` (if any) wasn't touched.
+
+---
+
+## Follow-up session: WhatsApp notification coverage
+
+**Context:** `services/notify.py` (WhatsApp Cloud API + Twilio SMS fallback) and the
+daily fee-reminder job already existed. This session covered every remaining piece
+that was either half-wired (backend done, no UI) or missing outright.
+
+### 1. "Send reminders now" button — was dead code, now wired
+`POST /payments/send-reminders-now` already existed backend-side with zero UI
+hookup (a known gap from an earlier HANDOFF entry). Added the button to
+`pages/Payments.tsx` - shows a "checked X, sent Y" summary after firing. No backend
+changes needed here at all.
+
+### 2. Class reschedule (cancellation alerts already existed)
+Cancellation notifications were ALREADY implemented (`POST /classes/{id}/cancel` +
+`_notify_batch`) - just no reschedule equivalent existed at all, and neither cancel
+nor the class list had any frontend UI.
+- Backend: new `POST /classes/{id}/reschedule` (`schemas.ClassReschedule`) - notifies
+  the batch with BOTH old and new time in one message (a bare "new time" is easy to
+  skim past). Rejects rescheduling a class that isn't currently `scheduled` (can't
+  reschedule something already cancelled/completed - 400).
+- Frontend: `pages/ScheduleClass.tsx` rewritten - now lists upcoming classes with
+  Cancel and Reschedule buttons (was create-only before, no visibility into existing
+  classes at all).
+- No new DB columns - reuses `ClassSession.start_time`/`end_time`, no migration
+  needed.
+
+### 3. New notification types: attendance + test results
+Neither existed before this session - `routers/attendance.py` and `routers/tests.py`
+had zero notify() calls.
+- **Attendance:** `POST /attendance/mark` now notifies a PARENT (only, not the
+  student - they already know they were absent) whenever a mark comes in as
+  `present: false`, if `parent_phone` is set. Runs as a background task, same
+  fire-and-forget pattern as `_notify_batch`.
+  **Known limitation:** fires on every absent mark including RE-marks (upsert calling
+  `/mark` again for the same class/student still re-notifies if still absent) - could
+  spam a parent if a teacher re-submits the same attendance sheet. Not fixed this
+  session - would need to only notify on a present→absent transition, which means
+  diffing against the existing record before overwriting it.
+- **Test results:** `POST /tests/attempts/{id}/submit` now notifies the student AND
+  parent (if set) with score/total/percent immediately after an `mcq_auto` test is
+  scored. **Only fires for `mcq_auto`** - a `document_locked` test has no instant
+  score (a teacher grades it manually, whenever that happens on their own timeline),
+  so there's no natural moment to notify at submit time for that test type. Worth
+  designing a separate "teacher publishes grade" trigger for document tests later.
+
+**Verified:** `py_compile` clean; a `FastAPI TestClient` script with `notify()` mocked
+(so no real WhatsApp/Twilio calls happen in tests) covering all three - reschedule
+fires the right message and blocks on non-scheduled classes, attendance fires to the
+parent phone specifically (not the student), test submission notifies both student and
+parent with the right score. All assertions passed. Frontend: `tsc --noEmit` and
+`npm run build` both clean.
+
+### Not done this session
+- Attendance re-mark spam (see limitation above).
+- No "publish grade" flow/notification for `document_locked` tests.
+- `TestAnalytics`'s UI hookup is a SEPARATE known gap (not WhatsApp-related, from an
+  earlier HANDOFF entry) - still not done, wasn't in scope here.
+- No notification preferences/opt-out anywhere - every parent with a phone on file
+  gets every applicable alert, no per-institute or per-parent toggle.
+- WhatsApp template names used (`class_rescheduled`, `attendance_absent`,
+  `test_result`) are new on top of the existing `class_scheduled`/`class_cancelled`/
+  `fee_reminder` ones - these need to actually exist as APPROVED templates in Meta's
+  WhatsApp Business dashboard before they'll work outside the 24h free-form window.
+  Nothing in code checks whether a template is actually approved - `notify()` will
+  just fail silently (falls back to SMS) if it isn't.

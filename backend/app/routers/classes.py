@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import ClassSession, ClassStatus, Student, Teacher, NotificationLog
-from ..schemas import ClassCreate, ClassCancel, ClassOut
+from ..schemas import ClassCreate, ClassCancel, ClassReschedule, ClassOut
 from ..auth import get_current_teacher
 from ..services.notify import notify
 
@@ -77,6 +77,43 @@ def cancel_class(
     reason_txt = f" ({payload.reason})" if payload.reason else ""
     msg = f"Class CANCELLED: {session.subject} for {session.batch} originally at {session.start_time.strftime('%d %b, %I:%M %p')}{reason_txt}"
     background_tasks.add_task(_notify_batch, db, teacher.institute_id, session.batch, msg, "class_cancelled")
+
+    return session
+
+
+@router.post("/{class_id}/reschedule", response_model=ClassOut)
+def reschedule_class(
+    class_id: str,
+    payload: ClassReschedule,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    teacher: Teacher = Depends(get_current_teacher),
+):
+    """Moves a scheduled class to a new time and notifies the batch with BOTH the old
+    and new time (a bare 'new time' alert is easy to skim past - showing what changed
+    from is what actually gets a parent to update their kid's plan). Only meaningful
+    for a still-scheduled class; a cancelled or already-completed session can't be
+    rescheduled, has to be re-created via POST /classes instead."""
+    session = db.query(ClassSession).filter(
+        ClassSession.id == class_id, ClassSession.institute_id == teacher.institute_id
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if session.status != ClassStatus.scheduled:
+        raise HTTPException(status_code=400, detail=f"Can't reschedule a {session.status.value} class")
+
+    old_start = session.start_time
+    session.start_time = payload.start_time
+    session.end_time = payload.end_time
+    db.commit()
+    db.refresh(session)
+
+    reason_txt = f" ({payload.reason})" if payload.reason else ""
+    msg = (
+        f"Class RESCHEDULED: {session.subject} for {session.batch}, moved from "
+        f"{old_start.strftime('%d %b, %I:%M %p')} to {session.start_time.strftime('%d %b, %I:%M %p')}{reason_txt}"
+    )
+    background_tasks.add_task(_notify_batch, db, teacher.institute_id, session.batch, msg, "class_rescheduled")
 
     return session
 

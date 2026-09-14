@@ -1,6 +1,6 @@
 import json
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -8,7 +8,8 @@ from ..models import Test, TestType, Question, TestAttempt, Student
 from ..schemas import TestCreateAuto, TestCreateDocument, TestSubmit, FlagEvent, TestOut, TestAnalytics, QuestionStat
 from ..auth import get_current_teacher, get_current_student
 from ..services.mcq_gen import generate_mcqs
-from ..models import Teacher
+from ..services.notify import notify
+from ..models import Teacher, NotificationLog
 
 router = APIRouter(prefix="/tests", tags=["tests"])
 
@@ -165,9 +166,35 @@ def start_attempt(test_id: str, db: Session = Depends(get_db),
                 "document_url": test.document_url}
 
 
+def _notify_result(institute_id: str, student_id: str, test_title: str, score: int, total: int):
+    """Runs as a background task, same fire-and-forget pattern as classes.py/attendance.py.
+    Only fires for mcq_auto tests - a document_locked test has no instant score (a
+    teacher grades it manually, whenever that happens), so there's nothing to notify
+    the moment the student hits submit. Opens its own DB session since background
+    tasks outlive the request's session."""
+    from ..database import SessionLocal
+    db = SessionLocal()
+    try:
+        student = db.query(Student).filter(Student.id == student_id).first()
+        if not student:
+            return
+        pct = round((score / total) * 100, 1) if total else 0.0
+        msg = f"Test result: {student.name} scored {score}/{total} ({pct}%) on \"{test_title}\"."
+        channel = notify(student.phone, msg, "test_result")
+        db.add(NotificationLog(institute_id=institute_id, recipient_phone=student.phone,
+                                channel=channel, message=msg, status=channel))
+        if student.parent_phone:
+            p_channel = notify(student.parent_phone, msg, "test_result")
+            db.add(NotificationLog(institute_id=institute_id, recipient_phone=student.parent_phone,
+                                    channel=p_channel, message=msg, status=p_channel))
+        db.commit()
+    finally:
+        db.close()
+
+
 @router.post("/attempts/{attempt_id}/submit")
-def submit_attempt(attempt_id: str, payload: TestSubmit, db: Session = Depends(get_db),
-                    student: Student = Depends(get_current_student)):
+def submit_attempt(attempt_id: str, payload: TestSubmit, background_tasks: BackgroundTasks,
+                    db: Session = Depends(get_db), student: Student = Depends(get_current_student)):
     from datetime import datetime
     attempt = db.query(TestAttempt).filter(
         TestAttempt.id == attempt_id, TestAttempt.student_id == student.id
@@ -189,6 +216,9 @@ def submit_attempt(attempt_id: str, payload: TestSubmit, db: Session = Depends(g
     attempt.submitted_at = datetime.utcnow()
     attempt.answers = json.dumps([a.dict() for a in payload.answers])
     db.commit()
+
+    if test.test_type == TestType.mcq_auto:
+        background_tasks.add_task(_notify_result, student.institute_id, student.id, test.title, score, len(correct))
 
     return {"score": score, "total": len(correct), "flagged": attempt.is_flagged, "flag_count": attempt.flag_count}
 

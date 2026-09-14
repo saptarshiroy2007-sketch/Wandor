@@ -167,6 +167,12 @@ class ClassCancel(BaseModel):
     reason: Optional[str] = None
 
 
+class ClassReschedule(BaseModel):
+    start_time: datetime
+    end_time: datetime
+    reason: Optional[str] = None
+
+
 class ClassOut(BaseModel):
     id: str
     batch: str

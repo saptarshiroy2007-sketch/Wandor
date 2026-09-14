@@ -1,18 +1,44 @@
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import AttendanceRecord, ClassSession, Student, Teacher
+from ..models import AttendanceRecord, ClassSession, Student, Teacher, NotificationLog
 from ..schemas import AttendanceMarkBulk, AttendanceOut, AttendanceSummary, BatchAttendanceAnalytics, StudentAttendanceRow
 from ..auth import get_current_teacher, get_current_student
+from ..services.notify import notify
 
 router = APIRouter(prefix="/attendance", tags=["attendance"])
+
+
+def _notify_absent_parents(db: Session, institute_id: str, session_id: str, absent_student_ids: list[str]):
+    """Runs as a background task, same pattern as classes.py's _notify_batch, so
+    marking attendance for a big batch doesn't block the teacher's request on N
+    WhatsApp calls. Only notifies a PARENT (not the student themselves - the student
+    already knows they were absent) and only if parent_phone is set."""
+    if not absent_student_ids:
+        return
+    session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
+    if not session:
+        return
+    students = db.query(Student).filter(Student.id.in_(absent_student_ids)).all()
+    for s in students:
+        if not s.parent_phone:
+            continue
+        msg = (
+            f"Attendance alert: {s.name} was marked ABSENT for {session.subject} "
+            f"({session.batch}) on {session.start_time.strftime('%d %b, %I:%M %p')}."
+        )
+        channel = notify(s.parent_phone, msg, "attendance_absent")
+        db.add(NotificationLog(institute_id=institute_id, recipient_phone=s.parent_phone,
+                                channel=channel, message=msg, status=channel))
+    db.commit()
 
 
 @router.post("/mark", response_model=List[AttendanceOut])
 def mark_attendance(
     payload: AttendanceMarkBulk,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     teacher: Teacher = Depends(get_current_teacher),
 ):
@@ -35,6 +61,7 @@ def mark_attendance(
         raise HTTPException(status_code=400, detail=f"Student(s) not found in your institute: {invalid}")
 
     results = []
+    newly_absent = []
     for mark in payload.marks:
         existing = db.query(AttendanceRecord).filter(
             AttendanceRecord.class_session_id == payload.class_session_id,
@@ -54,10 +81,15 @@ def mark_attendance(
             )
             db.add(record)
             results.append(record)
+        if not mark.present:
+            newly_absent.append(mark.student_id)
 
     db.commit()
     for r in results:
         db.refresh(r)
+
+    background_tasks.add_task(_notify_absent_parents, db, teacher.institute_id, payload.class_session_id, newly_absent)
+
     return results
 
 
