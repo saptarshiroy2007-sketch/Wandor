@@ -879,3 +879,59 @@ limitation documented in the Layout comment — each tab gets its own route as f
   on active link, phone width shows bottom tab bar not desktop links, teacher only sees 5 tabs,
   institute admin sees Institute + Teachers active + Students + Analytics greyed out.
 - All previous open items from the prior session remain open.
+
+---
+
+## Follow-up session: Settings page + password change
+
+**Commit:** `52efb022`
+**Tasks asked for:** Settings page (dark mode toggle, profile display, change password). Teacher profile display confirmed to include name + phone via a new GET /auth/me endpoint.
+
+### What changed
+
+#### `backend/app/routers/auth.py`
+- **New imports:** `OAuth2PasswordBearer` (for the generic bearer scheme), `_decode` and `get_current_teacher` from `auth.py`, `PasswordChange` and `TeacherProfile` from `schemas.py`, `settings` from `database`.
+- **`_any_bearer`** — a generic `OAuth2PasswordBearer(auto_error=False)` used by the change-password endpoint so it accepts tokens from any role without committing to a specific `tokenUrl`.
+- **`GET /auth/me`** — teacher-only (enforced by `get_current_teacher`). Returns `{ id, name, phone, institute_id }`. Students/parents/institute-admins each have their own `/me` endpoints elsewhere.
+- **`POST /auth/change-password`** — role-agnostic. Decodes the JWT directly via `_decode` to get `(sub, role)`, then looks up the right DB model (`Teacher`/`Student`/`Institute`). Verifies `old_password`, hashes and saves `new_password`. Returns `{"ok": true}`. Parent tokens get a 403 (parents have no self-managed password — PIN is teacher-set).
+
+#### `backend/app/schemas.py`
+- **`TeacherProfile`** — response model for `GET /auth/me`: `id`, `name`, `phone`, `institute_id`.
+- **`PasswordChange`** — request body for `POST /auth/change-password`: `old_password`, `new_password`. `model_post_init` validator rejects `new_password` shorter than 8 chars at the Pydantic layer (before the handler runs).
+
+#### `webapp/src/api/client.ts`
+- **`getMyProfile()`** — `GET /auth/me`, teacher-only. Returns `{ id, name, phone, institute_id }`.
+- **`changePassword(old, new)`** — `POST /auth/change-password`. Void return; throws on error (caller catches and surfaces the `detail` string).
+
+#### `webapp/src/pages/Settings.tsx` — NEW
+Three sections, all behind `<Layout>` (so the dark nav bar and gear button are present):
+1. **Appearance** — checkbox styled as a pill toggle. `checked` reads `isDarkTheme()`. `onChange` calls `setTheme(next)` and syncs local `dark` state. The CSS transition on the checkbox background (paper-line → signal-red) is handled entirely inline.
+2. **Profile** — teacher: fetches `getMyProfile()` on mount, shows name + phone in read-only fields. Student: "coming soon" placeholder. Institute admin: links to `/institute`. Parent: "linked to child's record" message.
+3. **Change password** — hidden for parent role. Three inputs (current / new / confirm). Client validates: new ≥ 8 chars, new === confirm. On submit calls `changePassword()`. Success: clears form + shows "✓ Password changed." error: surfaces backend `detail` string.
+
+#### `webapp/src/components/Layout.tsx`
+- Added `useNavigate` to the import (was removed last session — needed for future use; harmless now).
+- Added `<NavLink to="/settings" className="nav-logout" title="Settings">⚙</NavLink>` left of the logout button. Uses the same `.nav-logout` style so it sits quietly in the dark bar.
+
+#### `webapp/src/main.tsx`
+- Added `import Settings from './pages/Settings'`.
+- Added **`LoggedInOnly`** guard: redirects to `/` if `!isLoggedIn()`, passes through for any role.
+- Added `<Route path="/settings" element={<LoggedInOnly><Settings /></LoggedInOnly>} />`.
+
+### Verified
+- `py_compile` clean on `auth.py` and `schemas.py`.
+- Backend smoke test: `/auth/me` and `/auth/change-password` both appear in route list (53 routes total).
+- `tsc --noEmit` clean.
+- `vite build` clean — 107 modules, 267.97kB JS.
+
+### NOT tested (untested changes — verify manually before relying on)
+- **Dark mode toggle visual** — the checkbox pill toggle uses `appearance: none` + inline styles. It renders correctly in modern browsers but has not been visually confirmed. Check: does the pill slide and colour change on toggle? Does the page actually go dark?
+- **`GET /auth/me` against real Postgres** — smoke test only confirmed the route registers. Not tested with a live DB or a real teacher JWT.
+- **`POST /auth/change-password` against real Postgres** — same. Confirmed route registers; end-to-end (wrong password rejection, correct password acceptance, hash update persisted) not tested live.
+- **Settings page for non-teacher roles** — the student/parent/institute_admin branches in the Profile section are placeholders. They render but haven't been logged in as those roles and verified.
+- **Gear button on phone** — `⚙` appears in the top strip (always visible). Haven't confirmed it doesn't overflow or crowd the brand mark on small screens.
+
+### Still open
+- All items from the design system session remain open.
+- My Profile screen with photo upload and completion progress bar (deferred — needs storage design).
+- Content layout (section 3) — still rejected/pending rework.
