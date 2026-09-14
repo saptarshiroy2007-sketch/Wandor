@@ -798,3 +798,84 @@ new (migration 0006).
 `CreateTest.tsx` via PowerShell here-strings, which mangled single-quote escaping
 throughout the file and caused 100+ tsc errors. Fixed by writing via the editor tool
 directly instead. The broken intermediate state was replaced before commit.)*
+
+---
+
+## Follow-up session: design system + nav shell
+
+**Tasks asked for:** Implement the UI Design & Layout Spec (approved sections 1, 2, 4, 5).
+Section 3 (content layout) explicitly rejected/deferred — not touched.
+
+### What changed
+
+#### `webapp/index.html`
+- Added **Cinzel** (wght@400;700) to Google Fonts (Castellar dropped — Monotype trademark).
+- Added inline `<script>` before React loads that reads `localStorage.getItem('wandor_theme')`
+  and applies `data-theme="dark"` to `<html>` if set — prevents white flash on dark users.
+
+#### `webapp/src/index.css` — full rewrite
+- **New core tokens:** `--paper #eee9e0`, `--ink #141414`, `--signal-red #c1272d`,
+  `--ink-blue #1f3f8f`, `--surface #f7f4ec`, `--paper-line #d8d2c4`, `--muted #6b6656`.
+- **`--radius: 0`** throughout (hard edges, no soft border-radius anywhere).
+- **`--accent` is now `--signal-red`** (was `--ink-blue`). Primary buttons are red.
+- **Dark mode block** (`[data-theme="dark"]`): flips all palette tokens. Nav vars are
+  NOT in this block — nav is always `#141414` regardless of mode.
+- **Nav is now always dark.** Added `--nav-bg: #141414`, `--nav-text`, `--nav-text-active`,
+  `--nav-text-hover` as separate non-flipping tokens.
+- **Bottom tab bar** (`.bottom-tab-bar`): new CSS, `display: none` on desktop, `display: block`
+  on `<640px`. Signal-red top border, active tab gets red `border-top` and red text.
+- **Backward-compat aliases:** `--rule → --paper-line`, `--stamp-red → --signal-red`,
+  `--ink-blue-deep`, `--highlight`, `--highlight-ink` kept so existing page classes still work.
+- **Button hierarchy:** primary=red fill, `.btn-secondary`=ink fill (new), `.btn-ghost`=transparent,
+  `.btn-danger`=red outline (fills on hover, distinct from solid primary).
+- **OMR bubble** fill updated to `--signal-red` (was `--ink-blue`). Border transitions to red
+  on check. Focus ring is red.
+- **WCAG touch targets:** `min-height: 44px` on buttons, `52px` on bottom-tab.
+
+#### `webapp/src/components/Layout.tsx` — full rewrite
+- Removed `useNavigate` (unused after logout path changed to `window.location.href`).
+- `TEACHER_LINKS` — 5 entries with explicit `end` prop. Same routes as before.
+- `INSTITUTE_LINKS` (new) — 4 entries: Institute + Teachers (both `/institute` for now,
+  distinct routes planned for a future session), Students + Analytics (disabled, `to: null`).
+- `NavItem` union type enforces that disabled items have `to: null`, enabled items have `to: string`.
+- Desktop: `<nav className="nav">` with dark bar, brand mark left, `.nav-links` centered,
+  `.nav-logout` button right. Disabled tabs render as `<span className="nav-tab-disabled">`.
+- Phone: same top bar shows only brand mark (wordmark hidden via CSS). Below content,
+  `.bottom-tab-bar` renders role tabs. Disabled tabs rendered as non-interactive `<span>`.
+- Student and Parent roles: `getLinks()` returns `[]`, so no tab bar renders at all.
+  Top bar shows only brand mark + logout.
+
+#### `webapp/src/pages/TakeTest.tsx`
+- Removed all `className="page"` from outer divs — TakeTest is now truly full-bleed.
+- Loading/submitted states use inline flex centering, no `.page` cap.
+- MCQ variant has its own modest 720px cap inline — wider than the content-layout column
+  since answer options benefit from more width during reading.
+
+#### `webapp/src/api/client.ts`
+- Added `setTheme(dark: boolean)` and `isDarkTheme(): boolean` exports.
+  `setTheme` writes to `localStorage` AND sets the `data-theme` attribute live.
+  Ready for the Settings page to call — no other wiring needed.
+
+### Dark-mode toggle approach
+The toggle lives in a future Settings page (not yet built). The mechanism is already
+complete: `setTheme(true/false)` in client.ts + index.html flash-prevention script +
+`[data-theme="dark"]` CSS block. When Settings ships, it calls `setTheme` on a toggle flip.
+
+### Institute admin disabled tabs
+Students and Analytics tabs shown greyed out (`opacity ~20%`, `cursor: not-allowed`).
+Both Institute and Teachers currently point to `/institute` (one page). This is a known
+limitation documented in the Layout comment — each tab gets its own route as features land.
+
+### Verified
+- `tsc --noEmit` clean.
+- `vite build` clean — 8.70kB CSS (up from 6.39kB, new CSS), 263.56kB JS.
+
+### Not done / still open after this session
+- **Section 3 (content layout)** — explicitly deferred. The `.page` 640px cap is still in
+  place as a stopgap. Needs a fresh proposal before implementation.
+- **Ribbon component** — mentioned in spec section 4, not built. No concrete screen to attach
+  it to yet. Build it when a page with a "topper" or "overdue" hero moment ships.
+- Visual QA in a real browser — `npm run dev`, resize window, check: dark top bar, red underline
+  on active link, phone width shows bottom tab bar not desktop links, teacher only sees 5 tabs,
+  institute admin sees Institute + Teachers active + Students + Analytics greyed out.
+- All previous open items from the prior session remain open.
