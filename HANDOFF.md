@@ -691,3 +691,110 @@ parent with the right score. All assertions passed. Frontend: `tsc --noEmit` and
   WhatsApp Business dashboard before they'll work outside the 24h free-form window.
   Nothing in code checks whether a template is actually approved - `notify()` will
   just fail silently (falls back to SMS) if it isn't.
+
+---
+
+## Follow-up session: pre-fixes + MCQ→teacher-authored + batch-scoped tests
+
+**Tasks asked for:** (A1 delete, A2 lenient, A3 all) — the scope-decisions session's
+items 0, 0b, partial-1, partial-4, plus four pre-existing bugs from the audit session.
+
+### Pre-fix 1: commit floating uncommitted work — DONE
+The entire "WhatsApp notification coverage" session had never been committed
+(`attendance.py`, `classes.py`, `tests.py`, `schemas.py`, `client.ts`, `Payments.tsx`,
+`ScheduleClass.tsx`, `HANDOFF.md`). Committed as-is before touching anything else,
+as the audit session instructed. Commit: `fdeaa2cb`.
+
+### Pre-fix 2 / Item 1 partial: cross-tenant login collision — DONE (lenient)
+`student_login()` and `parent_login()` now accept an optional `institute_id` field in
+their request payload. When provided, the DB query is scoped to that institute — fixes
+the collision. When omitted, old behaviour applies (first row wins), which is fine for
+single-institute deployments. Non-breaking API change. Files: `schemas.py`
+(`StudentLogin.institute_id`, `ParentLogin.institute_id`), `routers/auth.py` (both
+login functions now build a query object and conditionally `.filter` by institute_id).
+The strict version (require institute_id) was not implemented per A2.
+
+### Pre-fix 3: pydantic exact pin — DONE
+`pydantic==2.10.0` → `pydantic>=2.10.0,<3.0` in `requirements.txt`. Third time this
+regression has been fixed. Root cause (likely a branch merge source) still not
+identified — whoever next merges a partner branch should grep for `pydantic==` before
+committing.
+
+### Pre-fix 4: Protected wrapper role check — DONE
+`main.tsx`'s generic `Protected` component now checks `getRole() === 'teacher'` in
+addition to `isLoggedIn()`, matching the pattern `StudentProtected`/`ParentProtected`/
+`InstituteProtected` already used. A logged-in student/parent/institute-admin no
+longer loads teacher-only page shells at `/schedule`, `/students`, `/create-test`,
+`/attendance`, `/payments`; they redirect to `/login` instead.
+
+### Item 0: MCQ generation → teacher-authored questions — DONE
+The `mcq_auto` test type is kept. The LLM call is gone.
+
+**What changed:**
+- `backend/app/services/mcq_gen.py` — **deleted**.
+- `backend/app/routers/tests.py` — `create_mcq_test` now accepts
+  `{title, duration_minutes, batch, questions: [{text, option_a, option_b, option_c, option_d, correct_option}]}`
+  from the teacher directly. Server-side validates `correct_option ∈ {a,b,c,d}` and
+  returns 400 on any invalid question (no silent bad data). `questions_created` in
+  response (was `questions_generated`). Removed `generate_mcqs` import.
+- `backend/app/schemas.py` — new `QuestionIn` schema. `TestCreateAuto` rewritten
+  (dropped `topic`, `num_questions`; added `questions: List[QuestionIn]`, `batch`).
+  `TestOut` dropped `topic`, gained `batch`. `TestCreateDocument` gained `batch`.
+- `backend/app/models.py` — `Test.topic` and `Test.num_questions` columns removed;
+  `Test.batch` (nullable) added.
+- `webapp/src/api/client.ts` — new exported `QuestionIn` interface; `createMcqTest()`
+  payload type updated to match; `createDocumentTest()` gains optional `batch`.
+- `webapp/src/pages/CreateTest.tsx` — MCQ form is now a question-builder: add/remove
+  questions, text + 4 options per question, OMR radio bubble marks correct answer.
+  "MCQ (auto-generated)" tab label is now just "MCQ". Both forms have an optional
+  `batch` field. Analytics panel preserved, unchanged.
+
+### Item 0b: Remove anthropic_api_key — DONE
+- `database.py` — `anthropic_api_key` field removed from `Settings`.
+- `requirements.txt` — `anthropic==0.39.0` removed.
+- `.env.example` — `ANTHROPIC_API_KEY` block removed.
+
+### Item 4 partial: Test batch-scoping bug — DONE
+`list_available_tests` now filters by `Test.batch IS NULL OR Test.batch == student.batch`.
+Tests with `batch=NULL` remain visible to all students (institute-wide). A test with a
+batch set is only shown to students whose `Student.batch` matches. Teachers can set
+`batch` on both MCQ and document tests at creation time. The `Test.batch` column is
+new (migration 0006).
+
+**Migration 0006** (`0006_remove_topic_num_questions_add_batch_delete_llm_tests.py`):
+- Drops `tests.topic` and `tests.num_questions`.
+- Captures IDs of `mcq_auto` tests with non-null `topic` (i.e. LLM-generated), deletes
+  their `Question` rows, their `TestAttempt` rows, then the `Test` rows themselves —
+  per A1 (delete, not keep).
+- Adds `tests.batch` (nullable).
+- **Run `alembic upgrade head` before starting the backend** — without it, SQLAlchemy
+  will fail on the missing/extra columns at startup.
+
+### Verified
+- `py_compile` clean on all changed/new backend Python files.
+- Full `from app.main import app` smoke test with SQLite: all 51 routes registered
+  correctly, no import errors.
+- `tsc --noEmit -p tsconfig.json` clean — zero errors.
+- `vite build` clean — 6.39kB CSS, 262.70kB JS, no build errors.
+
+### Not done / open items for next session
+- **Run `alembic upgrade head`** on the real dev DB (migration 0006 not yet applied).
+- No visual QA of the new question-builder UI — `npm run dev` and check the MCQ form
+  in a real browser before building more test-authoring features on top.
+- Pre-fix 2's lenient fix protects single-institute deployments fully; the strict
+  version (requiring `institute_id` always) and the full email-auth migration (HANDOFF
+  scope-decisions item 1) are still deferred.
+- `TestAnalytics` shows `attempt_count`/`average_score` correctly, but now that the
+  MCQ form is the teacher-authored question-builder, the existing analytics `questions`
+  list will correctly show per-question text from the teacher's own authored questions
+  (not placeholder text anymore) — worth a manual check once a real test is created.
+- The remaining scope-decisions items (2 OTP subsystem, 3 My Profile, 5 scheduling
+  robustness/recurrence, 6 iOS) are all still open.
+- The subscription/billing model (last HANDOFF session) remains entirely unimplemented.
+- Manual Intervention Required items at the top of this file remain unresolved.
+
+## Failed approaches
+*(No new failed approaches this session. The only non-trivial stumble was writing
+`CreateTest.tsx` via PowerShell here-strings, which mangled single-quote escaping
+throughout the file and caused 100+ tsc errors. Fixed by writing via the editor tool
+directly instead. The broken intermediate state was replaced before commit.)*
