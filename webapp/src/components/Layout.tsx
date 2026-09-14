@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { logout, getRole } from '../api/client';
 
 // ── Teacher: 5 destinations ──────────────────────────────────────────────────
@@ -72,6 +72,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
+          <NavLink to="/settings" className="nav-logout" title="Settings" style={{ textDecoration: 'none' }}>
+            ⚙
+          </NavLink>
           <button className="nav-logout" onClick={handleLogout}>
             Log out
           </button>

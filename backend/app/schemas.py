@@ -14,6 +14,22 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+class TeacherProfile(BaseModel):
+    id: str
+    name: str
+    phone: str
+    institute_id: Optional[str] = None
+
+
+class PasswordChange(BaseModel):
+    old_password: str
+    new_password: str
+
+    def model_post_init(self, __context: object) -> None:
+        if len(self.new_password) < 8:
+            raise ValueError("New password must be at least 8 characters")
+
+
 class StudentLogin(BaseModel):
     phone: str
     password: str

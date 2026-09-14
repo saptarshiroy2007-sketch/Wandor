@@ -19,6 +19,7 @@ import ManageStudents from './pages/ManageStudents';
 import CreateTest from './pages/CreateTest';
 import MarkAttendance from './pages/MarkAttendance';
 import StudentHome from './pages/StudentHome';
+import Settings from './pages/Settings';
 import { getRole } from './api/client';
 
 function isLoggedIn() {
@@ -26,24 +27,20 @@ function isLoggedIn() {
 }
 
 function Protected({ children }: { children: React.ReactNode }) {
-  // Check both logged-in AND teacher role - a student/parent/institute_admin token being
-  // present doesn't grant access to teacher-only pages. The backend rejects their API
-  // calls anyway (get_current_teacher), but this redirect avoids a confusing half-loaded
-  // page before the first API call fails.
   if (!isLoggedIn() || getRole() !== 'teacher') return <Navigate to="/login" />;
   return <>{children}</>;
 }
 
-// Test-taking is student-only - a teacher token being present doesn't grant access here,
-// since get_current_student on the backend would reject it anyway. Redirect to the
-// student login screen specifically, not the teacher one.
+// Any logged-in role can reach /settings — each role sees appropriate content there.
+function LoggedInOnly({ children }: { children: React.ReactNode }) {
+  if (!isLoggedIn()) return <Navigate to="/" />;
+  return <>{children}</>;
+}
+
 function StudentProtected({ children }: { children: React.ReactNode }) {
   return isLoggedIn() && getRole() === 'student' ? <>{children}</> : <Navigate to="/student-login" />;
 }
 
-// Same isolation as StudentProtected - a teacher or student token being present
-// doesn't grant access to the parent dashboard, since get_current_parent on the
-// backend would reject it anyway.
 function ParentProtected({ children }: { children: React.ReactNode }) {
   return isLoggedIn() && getRole() === 'parent' ? <>{children}</> : <Navigate to="/parent-login" />;
 }
@@ -52,10 +49,6 @@ function InstituteProtected({ children }: { children: React.ReactNode }) {
   return isLoggedIn() && getRole() === 'institute_admin' ? <>{children}</> : <Navigate to="/institute-login" />;
 }
 
-// "/" used to always render the teacher Dashboard (which redirected logged-out
-// visitors to /login), so opening the site landed straight on teacher login no
-// matter who you were. Now it shows a role picker to logged-out visitors, and
-// sends already-logged-in users straight to whichever dashboard matches their role.
 function HomeRoute() {
   if (!isLoggedIn()) return <RoleSelect />;
   const role = getRole();
@@ -78,6 +71,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/institute-login" element={<InstituteLogin />} />
         <Route path="/institute" element={<InstituteProtected><InstituteDashboard /></InstituteProtected>} />
         <Route path="/home" element={<StudentProtected><StudentHome /></StudentProtected>} />
+        <Route path="/settings" element={<LoggedInOnly><Settings /></LoggedInOnly>} />
         <Route path="/" element={<HomeRoute />} />
         <Route path="/schedule" element={<Protected><ScheduleClass /></Protected>} />
         <Route path="/students" element={<Protected><ManageStudents /></Protected>} />
@@ -89,3 +83,5 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </BrowserRouter>
   </React.StrictMode>
 );
+
+

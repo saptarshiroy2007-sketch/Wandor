@@ -86,6 +86,17 @@ export function isDarkTheme(): boolean {
   return localStorage.getItem('wandor_theme') === 'dark';
 }
 
+// ---------- Profile + password change ----------
+export async function getMyProfile(): Promise<{ id: string; name: string; phone: string; institute_id: string | null }> {
+  // Teacher-only endpoint. Students/parents/institute-admins have their own /me routes.
+  const { data } = await api.get('/auth/me');
+  return data;
+}
+
+export async function changePassword(old_password: string, new_password: string): Promise<void> {
+  await api.post('/auth/change-password', { old_password, new_password });
+}
+
 export async function scheduleClass(payload: {
   batch: string; subject: string; start_time: string; end_time: string;
 }) {
