@@ -3,10 +3,15 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import AttendanceRecord, ClassSession, Student, Teacher, NotificationLog
+from ..models import AttendanceRecord, ClassSession, Student, Teacher, NotificationLog, Batch
 from ..schemas import AttendanceMarkBulk, AttendanceOut, AttendanceSummary, BatchAttendanceAnalytics, StudentAttendanceRow
 from ..auth import get_current_teacher, get_current_student
 from ..services.notify import notify
+from ..services.access import assert_full_access
+from ..services.subscriptions import owner_for_teacher
+from ..scoping import owner_scope
+from ..timeutil import fmt_local, utcnow
+from ..models import ClassStatus
 
 router = APIRouter(prefix="/attendance", tags=["attendance"])
 
@@ -27,7 +32,7 @@ def _notify_absent_parents(db: Session, institute_id: str, session_id: str, abse
             continue
         msg = (
             f"Attendance alert: {s.name} was marked ABSENT for {session.subject} "
-            f"({session.batch}) on {session.start_time.strftime('%d %b, %I:%M %p')}."
+            f"({session.batch.name if session.batch else ''}) on {fmt_local(session.start_time)}."
         )
         channel = notify(s.parent_phone, msg, "attendance_absent")
         db.add(NotificationLog(institute_id=institute_id, recipient_phone=s.parent_phone,
@@ -44,29 +49,44 @@ def mark_attendance(
 ):
     """Bulk-marks attendance for every student in payload.marks against one class session.
     Upserts - calling this again for the same class re-marks rather than duplicating rows."""
+    assert_full_access(db, owner_for_teacher(teacher), 'Attendance')
     session = db.query(ClassSession).filter(
-        ClassSession.id == payload.class_session_id, ClassSession.institute_id == teacher.institute_id
+        ClassSession.id == payload.class_session_id, owner_scope(ClassSession, teacher)
     ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Class session not found")
+    # Attendance only means something for a class that actually ran. Marking a cancelled or
+    # not-yet-started class used to be accepted and silently inflated every attendance %.
+    if session.status == ClassStatus.cancelled:
+        raise HTTPException(status_code=400, detail="This class was cancelled - there's no attendance to mark")
+    if session.start_time > utcnow():
+        raise HTTPException(status_code=400, detail="This class hasn't started yet")
 
+    # ...and only for students who are in that class's batch.
     valid_student_ids = {
         s.id for s in db.query(Student.id).filter(
-            Student.institute_id == teacher.institute_id,
+            owner_scope(Student, teacher),
+            Student.batch_id == session.batch_id,
             Student.id.in_([m.student_id for m in payload.marks]),
         ).all()
     }
     invalid = [m.student_id for m in payload.marks if m.student_id not in valid_student_ids]
     if invalid:
-        raise HTTPException(status_code=400, detail=f"Student(s) not found in your institute: {invalid}")
+        raise HTTPException(status_code=400, detail=f"Student(s) not in this class's batch: {invalid}")
 
     results = []
     newly_absent = []
-    for mark in payload.marks:
+    marks = list({m.student_id: m for m in payload.marks}.values())  # same student twice: last mark wins
+    for mark in marks:
         existing = db.query(AttendanceRecord).filter(
             AttendanceRecord.class_session_id == payload.class_session_id,
             AttendanceRecord.student_id == mark.student_id,
         ).first()
+        # Was this student present (or unmarked) right before this write? Unmarked
+        # counts as "not previously absent" so a student's first-ever absent mark
+        # still notifies. Only an actual present->absent transition should fire -
+        # re-submitting an already-absent mark must NOT re-notify the parent.
+        was_present_or_unmarked = existing.present if existing else True
         if existing:
             existing.present = mark.present
             existing.marked_by_teacher_id = teacher.id
@@ -81,7 +101,7 @@ def mark_attendance(
             )
             db.add(record)
             results.append(record)
-        if not mark.present:
+        if not mark.present and was_present_or_unmarked:
             newly_absent.append(mark.student_id)
 
     db.commit()
@@ -100,7 +120,7 @@ def get_class_attendance(
     teacher: Teacher = Depends(get_current_teacher),
 ):
     session = db.query(ClassSession).filter(
-        ClassSession.id == class_session_id, ClassSession.institute_id == teacher.institute_id
+        ClassSession.id == class_session_id, owner_scope(ClassSession, teacher)
     ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Class session not found")
@@ -111,7 +131,14 @@ def get_class_attendance(
 
 
 def _summary_for(db: Session, student_id: str) -> AttendanceSummary:
-    records = db.query(AttendanceRecord).filter(AttendanceRecord.student_id == student_id).all()
+    # Cancelled classes never count toward a student's attendance (rows that predate the
+    # mark-time check may still exist for them).
+    records = (
+        db.query(AttendanceRecord)
+        .join(ClassSession, ClassSession.id == AttendanceRecord.class_session_id)
+        .filter(AttendanceRecord.student_id == student_id, ClassSession.status != ClassStatus.cancelled)
+        .all()
+    )
     total = len(records)
     present = sum(1 for r in records if r.present)
     pct = round((present / total) * 100, 1) if total else 0.0
@@ -125,24 +152,29 @@ def student_attendance_summary_for_teacher(
     teacher: Teacher = Depends(get_current_teacher),
 ):
     student = db.query(Student).filter(
-        Student.id == student_id, Student.institute_id == teacher.institute_id
+        Student.id == student_id, owner_scope(Student, teacher)
     ).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
     return _summary_for(db, student_id)
 
 
-@router.get("/batch/{batch}/analytics", response_model=BatchAttendanceAnalytics)
+@router.get("/batch/{batch_id}/analytics", response_model=BatchAttendanceAnalytics)
 def batch_attendance_analytics(
-    batch: str,
+    batch_id: str,
     db: Session = Depends(get_db),
     teacher: Teacher = Depends(get_current_teacher),
 ):
     """Per-student attendance % for every student in a batch, sorted lowest-first
     so at-risk students (the ones who need a call home) surface at the top instead
     of being buried in an alphabetical roster."""
+    assert_full_access(db, owner_for_teacher(teacher), 'Analytics')
+    batch = db.query(Batch).filter(Batch.id == batch_id, owner_scope(Batch, teacher)).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
     students = db.query(Student).filter(
-        Student.institute_id == teacher.institute_id, Student.batch == batch
+        owner_scope(Student, teacher), Student.batch_id == batch_id
     ).all()
     if not students:
         raise HTTPException(status_code=404, detail="No students found in this batch")
@@ -159,7 +191,7 @@ def batch_attendance_analytics(
 
     batch_avg = round(sum(r.attendance_pct for r in rows) / len(rows), 1) if rows else 0.0
     return BatchAttendanceAnalytics(
-        batch=batch, student_count=len(rows), batch_average_pct=batch_avg, students=rows,
+        batch_id=batch.id, batch_name=batch.name, student_count=len(rows), batch_average_pct=batch_avg, students=rows,
     )
 
 

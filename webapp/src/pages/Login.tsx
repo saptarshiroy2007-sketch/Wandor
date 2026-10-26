@@ -14,7 +14,14 @@ export default function Login() {
     try {
       await login(phone, password);
       navigate('/');
-    } catch {
+    } catch (err: any) {
+      if (err?.response?.status === 403) {
+        // Phone not verified yet - the backend already fired a fresh OTP as part of
+        // this same 403, so land straight on the code-entry step rather than making
+        // them retype name/password into the signup form again.
+        navigate(`/teacher-signup?verify=1&phone=${encodeURIComponent(phone)}`);
+        return;
+      }
       setError('Wrong phone number or password');
     }
   }
@@ -33,6 +40,9 @@ export default function Login() {
         <button type="submit">Log in</button>
       </form>
       <p className="hstack" style={{ justifyContent: 'center', marginTop: 16 }}>
+        <Link to="/forgot-password?role=teacher">Forgot password?</Link>
+      </p>
+      <p className="hstack" style={{ justifyContent: 'center', marginTop: 4 }}>
         <Link to="/student-login">Student login</Link> · <Link to="/parent-login">Parent login</Link>
       </p>
       <p className="hstack" style={{ justifyContent: 'center', marginTop: 4 }}>

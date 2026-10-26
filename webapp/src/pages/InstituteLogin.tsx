@@ -14,7 +14,11 @@ export default function InstituteLogin() {
     try {
       await instituteLogin(phone, password);
       navigate('/institute');
-    } catch {
+    } catch (err: any) {
+      if (err?.response?.status === 403) {
+        navigate(`/institute-signup?verify=1&phone=${encodeURIComponent(phone)}`);
+        return;
+      }
       setError('Wrong phone number or password');
     }
   }
@@ -33,6 +37,9 @@ export default function InstituteLogin() {
         <button type="submit">Log in</button>
       </form>
       <p className="hstack" style={{ justifyContent: 'center', marginTop: 16 }}>
+        <Link to="/forgot-password?role=institute_admin">Forgot password?</Link>
+      </p>
+      <p className="hstack" style={{ justifyContent: 'center', marginTop: 4 }}>
         <Link to="/institute-signup">New institute? Sign up</Link>
       </p>
       <p className="hstack" style={{ justifyContent: 'center', marginTop: 4 }}>

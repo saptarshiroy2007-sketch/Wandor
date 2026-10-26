@@ -51,7 +51,7 @@ def upgrade() -> None:
         sa.Column("hashed_password", sa.String, nullable=True),
     )
 
-    class_status = postgresql.ENUM("scheduled", "cancelled", "completed", name="classstatus")
+    class_status = postgresql.ENUM("scheduled", "cancelled", "completed", name="classstatus", create_type=False)
     class_status.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
@@ -80,7 +80,7 @@ def upgrade() -> None:
         sa.Column("is_paid", sa.Boolean, server_default=sa.false()),
     )
 
-    test_type = postgresql.ENUM("mcq_auto", "document_locked", name="testtype")
+    test_type = postgresql.ENUM("mcq_auto", "document_locked", name="testtype", create_type=False)
     test_type.create(op.get_bind(), checkfirst=True)
 
     op.create_table(

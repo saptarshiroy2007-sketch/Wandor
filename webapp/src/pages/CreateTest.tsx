@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { createMcqTest, createDocumentTest, uploadTestDocument, listTests, testAnalytics, QuestionIn } from '../api/client';
+import { createMcqTest, createDocumentTest, uploadTestDocument, listTests, testAnalytics, listUngradedAttempts, gradeAttempt, listBatches, createBatch, QuestionIn, TestAttemptOut, BatchOut } from '../api/client';
 import Layout from '../components/Layout';
 
 interface TestOut {
-  id: string; title: string; test_type: string; duration_minutes: number; batch?: string | null;
+  id: string; title: string; test_type: string; duration_minutes: number;
+  batch_id?: string | null; batch_name?: string | null;
 }
 
 const EMPTY_QUESTION = (): QuestionIn => ({
@@ -22,14 +23,19 @@ export default function CreateTest() {
   // MCQ fields
   const [title, setTitle] = useState('');
   const [duration, setDuration] = useState(30);
-  const [batch, setBatch] = useState('');
+  const [batchId, setBatchId] = useState('');
   const [questions, setQuestions] = useState<QuestionIn[]>([EMPTY_QUESTION()]);
 
   // Document fields
   const [docTitle, setDocTitle] = useState('');
   const [docDuration, setDocDuration] = useState(30);
-  const [docBatch, setDocBatch] = useState('');
+  const [docBatchId, setDocBatchId] = useState('');
   const [file, setFile] = useState<File | null>(null);
+
+  // Batches (shared picker across MCQ/document forms)
+  const [batches, setBatches] = useState<BatchOut[]>([]);
+  const [showNewBatch, setShowNewBatch] = useState(false);
+  const [newBatchName, setNewBatchName] = useState('');
 
   // Analytics
   const [openAnalyticsFor, setOpenAnalyticsFor] = useState<string | null>(null);
@@ -40,8 +46,31 @@ export default function CreateTest() {
     questions: { question_id: string; text: string; attempts: number; correct_count: number; correct_pct: number; is_weak: boolean }[];
   } | null>(null);
 
+  // Grading (document_locked tests)
+  const [openGradingFor, setOpenGradingFor] = useState<string | null>(null);
+  const [gradingLoading, setGradingLoading] = useState(false);
+  const [gradingError, setGradingError] = useState('');
+  const [ungraded, setUngraded] = useState<TestAttemptOut[]>([]);
+  const [gradeInputs, setGradeInputs] = useState<Record<string, { score: string; max_score: string }>>({});
+  const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<Record<string, string>>({});
+
   function refresh() { listTests().then(setTests); }
   useEffect(refresh, []);
+  useEffect(() => { listBatches().then(setBatches); }, []);
+
+  async function handleCreateBatch(applyTo: 'mcq' | 'document') {
+    if (!newBatchName.trim()) return;
+    try {
+      const b = await createBatch(newBatchName.trim());
+      setBatches((prev) => [...prev, b].sort((a, c) => a.name.localeCompare(c.name)));
+      if (applyTo === 'mcq') setBatchId(b.id); else setDocBatchId(b.id);
+      setNewBatchName('');
+      setShowNewBatch(false);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Could not create batch');
+    }
+  }
 
   function updateQuestion(index: number, field: keyof QuestionIn, value: string) {
     setQuestions((qs) => qs.map((q, i) => (i === index ? { ...q, [field]: value } : q)));
@@ -63,9 +92,9 @@ export default function CreateTest() {
     if (invalid !== -1) { setError(`Question ${invalid + 1}: all fields are required`); return; }
     setSaving(true);
     try {
-      const res = await createMcqTest({ title, duration_minutes: duration, batch: batch.trim() || undefined, questions });
+      const res = await createMcqTest({ title, duration_minutes: duration, batch_id: batchId || undefined, questions });
       setInfo(`Created — ${res.questions_created} question(s) saved.`);
-      setTitle(''); setBatch(''); setQuestions([EMPTY_QUESTION()]);
+      setTitle(''); setBatchId(''); setQuestions([EMPTY_QUESTION()]);
       refresh();
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Could not create test');
@@ -80,9 +109,9 @@ export default function CreateTest() {
     setError(''); setInfo(''); setSaving(true);
     try {
       const uploaded = await uploadTestDocument(file);
-      await createDocumentTest({ title: docTitle, document_url: uploaded.url, duration_minutes: docDuration, batch: docBatch.trim() || undefined });
+      await createDocumentTest({ title: docTitle, document_url: uploaded.url, duration_minutes: docDuration, batch_id: docBatchId || undefined });
       setInfo('Created.');
-      setDocTitle(''); setDocBatch(''); setFile(null);
+      setDocTitle(''); setDocBatchId(''); setFile(null);
       refresh();
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Could not create test');
@@ -100,6 +129,46 @@ export default function CreateTest() {
       setAnalyticsError(err?.response?.data?.detail || 'Could not load analytics');
     } finally {
       setAnalyticsLoading(false);
+    }
+  }
+
+  async function handleToggleGrading(testId: string) {
+    if (openGradingFor === testId) { setOpenGradingFor(null); return; }
+    setOpenGradingFor(testId); setUngraded([]); setGradingError(''); setGradingLoading(true);
+    try {
+      const attempts = await listUngradedAttempts(testId);
+      setUngraded(attempts);
+      setGradeInputs(Object.fromEntries(attempts.map((a) => [a.id, { score: '', max_score: '' }])));
+    } catch (err: any) {
+      setGradingError(err?.response?.data?.detail || 'Could not load submissions');
+    } finally {
+      setGradingLoading(false);
+    }
+  }
+
+  async function handlePublishGrade(attemptId: string) {
+    const input = gradeInputs[attemptId];
+    const score = Number(input?.score);
+    const maxScore = Number(input?.max_score);
+    setPublishError((e) => ({ ...e, [attemptId]: '' }));
+    if (!input?.score.trim() || !input?.max_score.trim() || isNaN(score) || isNaN(maxScore)) {
+      setPublishError((e) => ({ ...e, [attemptId]: 'Enter both score and max score' }));
+      return;
+    }
+    if (maxScore <= 0 || score < 0 || score > maxScore) {
+      setPublishError((e) => ({ ...e, [attemptId]: 'Score must be between 0 and max score' }));
+      return;
+    }
+    setPublishingId(attemptId);
+    try {
+      await gradeAttempt(attemptId, score, maxScore);
+      // Graded attempts drop off the "ungraded" worklist - the parent/student already
+      // got their WhatsApp ping from the backend, nothing more to show here.
+      setUngraded((list) => list.filter((a) => a.id !== attemptId));
+    } catch (err: any) {
+      setPublishError((e) => ({ ...e, [attemptId]: err?.response?.data?.detail || 'Could not publish grade' }));
+    } finally {
+      setPublishingId(null);
     }
   }
 
@@ -122,7 +191,19 @@ export default function CreateTest() {
             </div>
             <div style={{ flex: 1 }}>
               <label>Batch (optional — leave blank for all students)</label>
-              <input placeholder="e.g. Class 10A" value={batch} onChange={(e) => setBatch(e.target.value)} />
+              <div className="hstack" style={{ alignItems: 'center' }}>
+                <select value={batchId} onChange={(e) => setBatchId(e.target.value)} style={{ flex: 1 }}>
+                  <option value="">All students</option>
+                  {batches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                <button type="button" className="btn-ghost btn-sm" onClick={() => setShowNewBatch((v) => !v)}>+ New</button>
+              </div>
+              {showNewBatch && (
+                <div className="hstack" style={{ marginTop: 6 }}>
+                  <input placeholder="e.g. Class 10A" value={newBatchName} onChange={(e) => setNewBatchName(e.target.value)} />
+                  <button type="button" className="btn-sm" onClick={() => handleCreateBatch('mcq')}>Create</button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -188,7 +269,19 @@ export default function CreateTest() {
             </div>
             <div style={{ flex: 1 }}>
               <label>Batch (optional)</label>
-              <input placeholder="e.g. Class 10A" value={docBatch} onChange={(e) => setDocBatch(e.target.value)} />
+              <div className="hstack" style={{ alignItems: 'center' }}>
+                <select value={docBatchId} onChange={(e) => setDocBatchId(e.target.value)} style={{ flex: 1 }}>
+                  <option value="">All students</option>
+                  {batches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                <button type="button" className="btn-ghost btn-sm" onClick={() => setShowNewBatch((v) => !v)}>+ New</button>
+              </div>
+              {showNewBatch && (
+                <div className="hstack" style={{ marginTop: 6 }}>
+                  <input placeholder="e.g. Class 10A" value={newBatchName} onChange={(e) => setNewBatchName(e.target.value)} />
+                  <button type="button" className="btn-sm" onClick={() => handleCreateBatch('document')}>Create</button>
+                </div>
+              )}
             </div>
           </div>
           <div>
@@ -212,7 +305,7 @@ export default function CreateTest() {
                 <div>{t.title}</div>
                 <p style={{ margin: '2px 0 0' }}>
                   {t.duration_minutes} min
-                  {t.batch ? ` · ${t.batch}` : ' · all students'}
+                  {t.batch_name ? ` · ${t.batch_name}` : ' · all students'}
                 </p>
               </div>
               <div className="hstack">
@@ -220,6 +313,11 @@ export default function CreateTest() {
                 {t.test_type === 'mcq_auto' && (
                   <button className="btn-ghost btn-sm" onClick={() => handleToggleAnalytics(t.id)}>
                     {openAnalyticsFor === t.id ? 'Hide analytics' : 'View analytics'}
+                  </button>
+                )}
+                {t.test_type === 'document_locked' && (
+                  <button className="btn-ghost btn-sm" onClick={() => handleToggleGrading(t.id)}>
+                    {openGradingFor === t.id ? 'Hide grading' : 'Grade submissions'}
                   </button>
                 )}
               </div>
@@ -248,6 +346,43 @@ export default function CreateTest() {
                     )}
                   </>
                 )}
+              </div>
+            )}
+            {openGradingFor === t.id && (
+              <div className="card stack" style={{ marginTop: -4 }}>
+                {gradingLoading && <p style={{ margin: 0 }}>Loading…</p>}
+                {gradingError && <p className="error">{gradingError}</p>}
+                {!gradingLoading && !gradingError && ungraded.length === 0 && (
+                  <p className="empty">Nothing waiting to be graded — every submission's marked.</p>
+                )}
+                {!gradingLoading && ungraded.map((a) => (
+                  <div key={a.id} className="card stack" style={{ marginBottom: 8 }}>
+                    <div className="row">
+                      <span>Submitted {new Date(a.submitted_at as string).toLocaleString()}</span>
+                      {a.is_flagged && <span className="badge badge-muted">Flagged ×{a.flag_count}</span>}
+                    </div>
+                    <div className="hstack" style={{ alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="number" min={0} placeholder="Score" style={{ width: 90 }}
+                        value={gradeInputs[a.id]?.score ?? ''}
+                        onChange={(e) => setGradeInputs((g) => ({ ...g, [a.id]: { ...g[a.id], score: e.target.value } }))}
+                      />
+                      <span>/</span>
+                      <input
+                        type="number" min={1} placeholder="Max score" style={{ width: 90 }}
+                        value={gradeInputs[a.id]?.max_score ?? ''}
+                        onChange={(e) => setGradeInputs((g) => ({ ...g, [a.id]: { ...g[a.id], max_score: e.target.value } }))}
+                      />
+                      <button
+                        className="btn-sm" disabled={publishingId === a.id}
+                        onClick={() => handlePublishGrade(a.id)}
+                      >
+                        {publishingId === a.id ? 'Publishing…' : 'Publish grade'}
+                      </button>
+                    </div>
+                    {publishError[a.id] && <p className="error" style={{ margin: 0 }}>{publishError[a.id]}</p>}
+                  </div>
+                ))}
               </div>
             )}
           </div>

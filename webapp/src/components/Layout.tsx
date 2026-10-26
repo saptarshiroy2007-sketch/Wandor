@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { logout, getRole } from '../api/client';
+import AccessBanner from './AccessBanner';
 
 // ── Teacher: 5 destinations ──────────────────────────────────────────────────
 const TEACHER_LINKS = [
@@ -16,7 +17,7 @@ const TEACHER_LINKS = [
 const INSTITUTE_LINKS = [
   { to: '/institute', label: 'Institute', end: true,  disabled: false },
   { to: '/institute', label: 'Teachers',  end: false, disabled: false },
-  { to: null,         label: 'Students',             disabled: true  },
+  { to: '/institute/students', label: 'Students', end: false, disabled: false },
   { to: null,         label: 'Analytics',            disabled: true  },
 ];
 
@@ -82,7 +83,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </nav>
 
       {/* ── Page content ─────────────────────────────────────── */}
-      <div className="page">{children}</div>
+      <div className="page">
+        <AccessBanner />
+        {children}
+      </div>
 
       {/* ── Bottom tab bar (phone only, via CSS display:none on desktop) ── */}
       {links.length > 0 && (

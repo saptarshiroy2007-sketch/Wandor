@@ -14,6 +14,7 @@ institute self-signup now sets directly instead.
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 revision = "0005"
 down_revision = "0004"
@@ -24,8 +25,8 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "teacher_batch_assignments",
-        sa.Column("id", sa.String, primary_key=True),
-        sa.Column("teacher_id", sa.String, sa.ForeignKey("teachers.id"), nullable=False),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("teacher_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("teachers.id"), nullable=False),
         sa.Column("batch", sa.String, nullable=False),
     )
     op.create_index(

@@ -24,3 +24,4 @@ webapp/.vite/
 *.swp
 .vscode/
 .idea/
+.superpowers/

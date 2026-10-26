@@ -1,51 +1,42 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import '../landing.css';
+
+const DOORS = [
+  { to: '/login', name: 'Teacher', note: 'Classes, attendance, tests, fees' },
+  { to: '/institute-login', name: 'Institute', note: 'Your centre and its teachers' },
+  { to: '/student-login', name: 'Student', note: 'Timetable, tests, results' },
+  { to: '/parent-login', name: 'Parent', note: 'Attendance, results, fees' },
+];
 
 export default function RoleSelect() {
-  const [showStudentOptions, setShowStudentOptions] = useState(false);
-  const navigate = useNavigate();
-
   return (
-    <div className="page" style={{ maxWidth: 360, paddingTop: '15vh' }}>
-      <div className="brand" style={{ justifyContent: 'center', marginBottom: 4 }}>
-        <span className="brand-mark">W</span>
-        <span className="brand-word" style={{ fontSize: 26 }}>Wandor</span>
+    <div className="lp lp-enter">
+      <div className="lp-enter-left">
+        <Link to="/" className="lp-logo" aria-label="Wandor home">
+          <span className="lp-logo-mark" aria-hidden="true">W</span>
+          <span className="lp-logo-word" style={{ color: 'var(--lp-ivory)' }}>Wandor</span>
+        </Link>
+        <h1 className="lp-enter-h">
+          Who's<br />logging<br />in?
+        </h1>
+        <div className="lp-enter-circle" aria-hidden="true" />
       </div>
-      <p>Who's logging in?</p>
 
-      <div className="stack">
-        <button onClick={() => navigate('/login')}>Teacher</button>
-
-        <button
-          className="btn"
-          style={{ background: 'var(--surface)', color: 'var(--ink)' }}
-          onClick={() => navigate('/institute-login')}
-        >
-          Institute owner
-        </button>
-
-        {!showStudentOptions ? (
-          <button
-            className="btn"
-            style={{ background: 'var(--surface)', color: 'var(--ink)' }}
-            onClick={() => setShowStudentOptions(true)}
-          >
-            Student
-          </button>
-        ) : (
-          <div className="card stack">
-            <p style={{ margin: 0 }}>Student</p>
-            <button onClick={() => navigate('/student-login')}>Student login</button>
-            <button
-              className="btn"
-              style={{ background: 'var(--surface)', color: 'var(--ink)' }}
-              onClick={() => navigate('/parent-login')}
-            >
-              Parent login
-            </button>
-          </div>
-        )}
-      </div>
+      <main className="lp-enter-right">
+        <ul className="lp-doors">
+          {DOORS.map((d, i) => (
+            <li key={d.to}>
+              <Link to={d.to} className="lp-door" style={{ ['--d' as string]: i }}>
+                <span className="lp-door-name">{d.name}</span>
+                <span className="lp-door-note">{d.note}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+        <p className="lp-enter-new lp-label">
+          New here? <Link to="/teacher-signup">Teacher sign up</Link> · <Link to="/institute-signup">Register an institute</Link>
+        </p>
+      </main>
     </div>
   );
 }

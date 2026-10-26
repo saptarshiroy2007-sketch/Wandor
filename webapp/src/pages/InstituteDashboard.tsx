@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getInstitute, updateInstitute, listInstituteTeachers, createTeacher, deleteTeacher } from '../api/client';
+import { getInstitute, updateInstitute, listInstituteTeachers, createTeacher, deleteTeacher, setTeacherBatches, listInstituteBatches, createInstituteBatch, BatchOut } from '../api/client';
+import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 
 interface InstituteOut {
@@ -7,7 +8,7 @@ interface InstituteOut {
 }
 
 interface TeacherOut {
-  id: string; name: string; phone: string; is_owner: boolean;
+  id: string; name: string; phone: string; is_owner: boolean; batches?: BatchOut[];
 }
 
 export default function InstituteDashboard() {
@@ -21,10 +22,25 @@ export default function InstituteDashboard() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [newBatchIds, setNewBatchIds] = useState<string[]>([]);
+  const [batches, setBatches] = useState<BatchOut[]>([]);
+  const [batchName, setBatchName] = useState('');
+  const [batchError, setBatchError] = useState('');
+  const [listError, setListError] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editIds, setEditIds] = useState<string[]>([]);
+
+  const msg = (err: any, fb: string) => {
+    const d = err?.response?.data?.detail;
+    return typeof d === 'string' ? d : Array.isArray(d) ? d.map((x: any) => x.msg).join('; ') : fb;
+  };
+  const toggle = (ids: string[], id: string) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
 
   function refresh() {
     getInstitute().then((inst) => { setInstitute(inst); setNameDraft(inst.name); });
     listInstituteTeachers().then(setTeachers);
+    listInstituteBatches().then(setBatches).catch(() => {});
   }
 
   useEffect(refresh, []);
@@ -45,11 +61,11 @@ export default function InstituteDashboard() {
     setError('');
     setSaving(true);
     try {
-      await createTeacher({ name, phone, password });
-      setName(''); setPhone(''); setPassword('');
+      await createTeacher({ name, phone, password, is_owner: isOwner, batch_ids: isOwner ? [] : newBatchIds });
+      setName(''); setPhone(''); setPassword(''); setIsOwner(false); setNewBatchIds([]);
       refresh();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Could not add teacher');
+      setError(msg(err, 'Could not add teacher'));
     } finally {
       setSaving(false);
     }
@@ -57,8 +73,22 @@ export default function InstituteDashboard() {
 
   async function handleRemoveTeacher(id: string) {
     if (!confirm('Remove this teacher?')) return;
-    await deleteTeacher(id);
+    setListError('');
+    try { await deleteTeacher(id); } catch (err: any) { setListError(msg(err, 'Could not remove teacher')); }
     refresh();
+  }
+
+  async function handleAddBatch(e: React.FormEvent) {
+    e.preventDefault();
+    setBatchError('');
+    try { await createInstituteBatch(batchName.trim()); setBatchName(''); refresh(); }
+    catch (err: any) { setBatchError(msg(err, 'Could not create batch')); }
+  }
+
+  async function handleSaveBatches(teacherId: string) {
+    setListError('');
+    try { await setTeacherBatches(teacherId, editIds); setEditingId(null); refresh(); }
+    catch (err: any) { setListError(msg(err, 'Could not update batches')); }
   }
 
   return (
@@ -72,13 +102,21 @@ export default function InstituteDashboard() {
             <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} />
           </div>
           <p style={{ margin: 0 }}>
-            Owner phone: {institute.owner_phone} · Plan: <span className="badge">{institute.plan}</span>
+            Owner phone: {institute.owner_phone} · Plan: <span className="badge">{institute.plan}</span> <Link to="/billing">Manage plan</Link>
           </p>
           <button type="submit" disabled={savingName || nameDraft === institute.name}>
             {savingName ? 'Saving…' : 'Save'}
           </button>
         </form>
       )}
+
+      <h2>Batches ({batches.length})</h2>
+      <form onSubmit={handleAddBatch} className="card hstack">
+        <input required maxLength={100} placeholder="New batch name" value={batchName} onChange={(e) => setBatchName(e.target.value)} style={{ flex: 1 }} />
+        <button type="submit">Add batch</button>
+      </form>
+      {batchError && <p className="error">{batchError}</p>}
+      {batches.length > 0 && <p style={{ margin: '0 0 8px' }}>{batches.map((b) => b.name).join(' · ')}</p>}
 
       <h2>Add a teacher</h2>
       <form onSubmit={handleAddTeacher} className="card stack">
@@ -87,11 +125,27 @@ export default function InstituteDashboard() {
           <input required placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} style={{ flex: 1 }} />
         </div>
         <input required placeholder="Login password for teacher" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <label className="omr-option" style={{ padding: 0 }}>
+          <input type="checkbox" checked={isOwner} onChange={(e) => setIsOwner(e.target.checked)} />
+          <span className="omr-bubble square" /> Owner (can manage every batch)
+        </label>
+        {!isOwner && batches.length > 0 && (
+          <div>
+            <label>Batches this teacher can manage</label>
+            {batches.map((b) => (
+              <label key={b.id} className="omr-option" style={{ padding: '4px 0' }}>
+                <input type="checkbox" checked={newBatchIds.includes(b.id)} onChange={() => setNewBatchIds(toggle(newBatchIds, b.id))} />
+                <span className="omr-bubble square" /> {b.name}
+              </label>
+            ))}
+          </div>
+        )}
         {error && <p className="error">{error}</p>}
         <button type="submit" disabled={saving}>{saving ? 'Adding…' : 'Add teacher'}</button>
       </form>
 
       <h2>Teachers ({teachers.length})</h2>
+      {listError && <p className="error">{listError}</p>}
       {teachers.length === 0 ? (
         <p className="empty">No teachers yet.</p>
       ) : (
@@ -99,9 +153,32 @@ export default function InstituteDashboard() {
           <div className="card row" key={t.id}>
             <div>
               <div>{t.name} <span style={{ color: 'var(--muted)', fontSize: 13 }}>{t.phone}</span></div>
-              {t.is_owner && <span className="badge">owner</span>}
+              {t.is_owner ? <span className="badge">owner</span> : (
+                <p style={{ margin: '2px 0 0', fontSize: 13 }}>
+                  Batches: {t.batches && t.batches.length ? t.batches.map((b) => b.name).join(', ') : 'none assigned'}
+                </p>
+              )}
+              {editingId === t.id && (
+                <div style={{ marginTop: 8 }}>
+                  {batches.map((b) => (
+                    <label key={b.id} className="omr-option" style={{ padding: '4px 0' }}>
+                      <input type="checkbox" checked={editIds.includes(b.id)} onChange={() => setEditIds(toggle(editIds, b.id))} />
+                      <span className="omr-bubble square" /> {b.name}
+                    </label>
+                  ))}
+                  <div className="hstack" style={{ marginTop: 6 }}>
+                    <button className="btn-sm" onClick={() => handleSaveBatches(t.id)}>Save</button>
+                    <button className="btn-ghost btn-sm" onClick={() => setEditingId(null)}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </div>
-            <button className="btn-ghost btn-sm" onClick={() => handleRemoveTeacher(t.id)}>Remove</button>
+            <div className="hstack">
+              {!t.is_owner && editingId !== t.id && (
+                <button className="btn-ghost btn-sm" onClick={() => { setEditingId(t.id); setEditIds((t.batches || []).map((b) => b.id)); }}>Assign batches</button>
+              )}
+              <button className="btn-ghost btn-sm" onClick={() => handleRemoveTeacher(t.id)}>Remove</button>
+            </div>
           </div>
         ))
       )}

@@ -1,20 +1,23 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { studentLogin } from '../api/client';
+import { studentLogin, AccountChoiceError } from '../api/client';
 
 export default function StudentLogin() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [choices, setChoices] = useState<{ student_id: string; label: string }[] | null>(null);
   const navigate = useNavigate();
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent, studentId?: string) {
     e.preventDefault();
     setError('');
     try {
-      await studentLogin(phone, password);
+      await studentLogin(phone, password, studentId);
       navigate('/home');
-    } catch {
+    } catch (err: any) {
+      if (err instanceof AccountChoiceError) { setChoices(err.choices); return; }
+      if (err?.response?.status === 429) { setError('Too many attempts. Please wait a minute and try again.'); return; }
       // Covers both wrong credentials AND a student whose login was never activated
       // (hashed_password is null until a teacher sets one via POST /students or
       // POST /students/{id}/set-password) - same 401 either way, so same message.
@@ -35,7 +38,18 @@ export default function StudentLogin() {
         {error && <p className="error">{error}</p>}
         <button type="submit">Log in</button>
       </form>
+      {choices && (
+        <div className="card stack">
+          <p style={{ margin: 0 }}>More than one account uses this number and PIN. Which one is yours?</p>
+          {choices.map((c) => (
+            <button key={c.student_id} type="button" className="btn-ghost" onClick={(e) => handleSubmit(e, c.student_id)}>{c.label}</button>
+          ))}
+        </div>
+      )}
       <p className="hstack" style={{ justifyContent: 'center', marginTop: 16 }}>
+        <Link to="/forgot-password?role=student">Forgot password?</Link>
+      </p>
+      <p className="hstack" style={{ justifyContent: 'center', marginTop: 4 }}>
         <Link to="/login">Teacher login</Link> · <Link to="/parent-login">Parent login</Link>
       </p>
     </div>

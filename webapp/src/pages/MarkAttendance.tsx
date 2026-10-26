@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { listClasses, listStudents, markAttendance, getClassAttendance } from '../api/client';
 import Layout from '../components/Layout';
 
-interface ClassSession { id: string; batch: string; subject: string; start_time: string; status: string; }
-interface StudentOut { id: string; name: string; phone: string; batch?: string | null; }
+interface ClassSession { id: string; batch_id: string; batch_name: string; subject: string; start_time: string; status: string; }
+interface StudentOut { id: string; name: string; phone: string; batch_id?: string | null; batch_name?: string | null; }
 
 export default function MarkAttendance() {
   const [classes, setClasses] = useState<ClassSession[]>([]);
@@ -12,15 +12,17 @@ export default function MarkAttendance() {
   const [present, setPresent] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => { listClasses().then(setClasses); }, []);
+  useEffect(() => { setError(''); }, [classId]);
 
   const selected = classes.find((c) => c.id === classId);
 
   useEffect(() => {
     if (!selected) { setStudents([]); return; }
     setSaved(false);
-    listStudents(selected.batch).then(async (roster) => {
+    listStudents(selected.batch_id).then(async (roster) => {
       setStudents(roster);
       const existing = await getClassAttendance(classId).catch(() => []);
       const marks: Record<string, boolean> = {};
@@ -32,9 +34,13 @@ export default function MarkAttendance() {
 
   async function handleSave() {
     setSaving(true);
+    setError('');
     try {
       await markAttendance(classId, students.map((s) => ({ student_id: s.id, present: !!present[s.id] })));
       setSaved(true);
+    } catch (err: any) {
+      const d = err?.response?.data?.detail;
+      setError(typeof d === 'string' ? d : 'Could not save attendance');
     } finally {
       setSaving(false);
     }
@@ -49,11 +55,12 @@ export default function MarkAttendance() {
         <select value={classId} onChange={(e) => setClassId(e.target.value)}>
           <option value="">Select a class…</option>
           {classes
+            .filter((c) => c.status !== 'cancelled' && +new Date(c.start_time) <= Date.now())
             .slice()
             .sort((a, b) => +new Date(b.start_time) - +new Date(a.start_time))
             .map((c) => (
               <option key={c.id} value={c.id}>
-                {c.subject} — {c.batch} — {new Date(c.start_time).toLocaleDateString()}
+                {c.subject} — {c.batch_name} — {new Date(c.start_time).toLocaleDateString()}
               </option>
             ))}
         </select>
@@ -61,7 +68,7 @@ export default function MarkAttendance() {
 
       {selected && (
         <>
-          <h2>{selected.batch} ({students.length})</h2>
+          <h2>{selected.batch_name} ({students.length})</h2>
           {students.length === 0 ? (
             <p className="empty">No students in this batch.</p>
           ) : (
@@ -84,6 +91,7 @@ export default function MarkAttendance() {
           {students.length > 0 && (
             <div className="hstack" style={{ marginTop: 12 }}>
               <button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save attendance'}</button>
+              {error && <span className="error">{error}</span>}
               {saved && <span style={{ color: 'var(--accent)', fontSize: 13 }}>Saved.</span>}
             </div>
           )}

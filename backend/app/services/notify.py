@@ -9,7 +9,8 @@ from twilio.rest import Client as TwilioClient
 from ..database import settings
 
 
-def send_whatsapp(to_phone: str, message: str, template_name: str | None = None) -> bool:
+def send_whatsapp(to_phone: str, message: str, template_name: str | None = None,
+                  template_params: list[str] | None = None) -> bool:
     """
     Uses WhatsApp Cloud API directly (Meta). For anything outside the 24hr customer
     service window, you MUST use a pre-approved template (template_name) - free-form
@@ -20,11 +21,19 @@ def send_whatsapp(to_phone: str, message: str, template_name: str | None = None)
     headers = {"Authorization": f"Bearer {settings.whatsapp_access_token}"}
 
     if template_name:
+        template = {"name": template_name, "language": {"code": "en"}}
+        if template_params:
+            # Fills the template's {{1}}, {{2}}... body variables, in order. The template
+            # must be created and approved in Meta Business Manager with exactly this many.
+            template["components"] = [{
+                "type": "body",
+                "parameters": [{"type": "text", "text": str(v)} for v in template_params],
+            }]
         payload = {
             "messaging_product": "whatsapp",
             "to": to_phone,
             "type": "template",
-            "template": {"name": template_name, "language": {"code": "en"}},
+            "template": template,
         }
     else:
         payload = {
@@ -51,9 +60,11 @@ def send_sms(to_phone: str, message: str) -> bool:
         return False
 
 
-def notify(to_phone: str, message: str, template_name: str | None = None) -> str:
-    """Try WhatsApp first, fall back to SMS. Returns the channel that succeeded."""
-    if send_whatsapp(to_phone, message, template_name):
+def notify(to_phone: str, message: str, template_name: str | None = None,
+           template_params: list[str] | None = None) -> str:
+    """Try WhatsApp first, fall back to SMS (which always carries the full `message`).
+    Returns the channel that succeeded."""
+    if send_whatsapp(to_phone, message, template_name, template_params):
         return "whatsapp"
     if send_sms(to_phone, message):
         return "sms"

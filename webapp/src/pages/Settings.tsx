@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
-import { getRole, isDarkTheme, setTheme, getMyProfile, changePassword } from '../api/client';
+import { getRole, isDarkTheme, setTheme, getMyProfile, changePassword, joinInstitute, MyProfile as MyProfileData } from '../api/client';
 
 export default function Settings() {
   const role = getRole();
@@ -15,7 +16,7 @@ export default function Settings() {
   }
 
   // ── Profile ───────────────────────────────────────────────────────────────
-  const [profile, setProfile] = useState<{ name: string; phone: string } | null>(null);
+  const [profile, setProfile] = useState<MyProfileData | null>(null);
   const [profileErr, setProfileErr] = useState('');
 
   useEffect(() => {
@@ -24,6 +25,26 @@ export default function Settings() {
       .then(setProfile)
       .catch(() => setProfileErr('Could not load profile.'));
   }, [role]);
+
+  // ── Join institute (independent teachers only) ──────────────────────────────
+  const [instPhone, setInstPhone] = useState('');
+  const [instPassword, setInstPassword] = useState('');
+  const [joinError, setJoinError] = useState('');
+  const [joinLoading, setJoinLoading] = useState(false);
+
+  async function handleJoinInstitute(e: React.FormEvent) {
+    e.preventDefault();
+    setJoinError(''); setJoinLoading(true);
+    try {
+      const updated = await joinInstitute(instPhone, instPassword);
+      setProfile((p) => (p ? { ...p, institute_id: updated.institute_id } : p));
+      setInstPhone(''); setInstPassword('');
+    } catch (err: any) {
+      setJoinError(err?.response?.data?.detail || 'Could not join that institute. Check the phone number and password.');
+    } finally {
+      setJoinLoading(false);
+    }
+  }
 
   // ── Change password ───────────────────────────────────────────────────────
   const [oldPw, setOldPw] = useState('');
@@ -83,31 +104,62 @@ export default function Settings() {
       {/* 2. Profile */}
       <h2>Profile</h2>
       <div className="card">
-        {role === 'teacher' && (
-          <>
-            {profileErr && <p className="error">{profileErr}</p>}
-            {profile ? (
-              <div className="stack" style={{ gap: 12 }}>
-                <div>
-                  <label>Name</label>
-                  <div style={{ fontSize: 15, color: 'var(--ink)', paddingTop: 2 }}>{profile.name}</div>
-                </div>
-                <div>
-                  <label>Phone</label>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, color: 'var(--ink)', paddingTop: 2 }}>{profile.phone}</div>
-                </div>
-              </div>
-            ) : !profileErr ? (
-              <p className="empty">Loading…</p>
-            ) : null}
-          </>
-        )}
-        {role === 'student' && <p className="empty">Profile editing for students coming soon.</p>}
-        {role === 'institute_admin' && (
-          <p className="empty">Institute profile is managed from the <a href="/institute">Institute dashboard</a>.</p>
+        {(role === 'teacher' || role === 'student' || role === 'institute_admin') && (
+          <div className="row">
+            <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+              Name, photo, bio{role === 'teacher' ? ', education' : ''} and contact email
+            </span>
+            <Link to="/my-profile"><button type="button" className="btn-sm">Edit My Profile</button></Link>
+          </div>
         )}
         {role === 'parent' && <p className="empty">Your details are linked to your child&apos;s student record.</p>}
       </div>
+
+      {/* 2a. Plan & billing — teachers (independent: their own plan; institute member: read-only) and institute admins */}
+      {(role === 'teacher' || role === 'institute_admin') && (
+        <>
+          <h2>Plan &amp; billing</h2>
+          <div className="card row">
+            <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+              Your plan, usage and subscription
+            </span>
+            <Link to="/billing"><button type="button" className="btn-sm">Manage plan</button></Link>
+          </div>
+        </>
+      )}
+
+      {/* 2b. Join institute — independent teachers only */}
+      {role === 'teacher' && profile && !profile.institute_id && (
+        <>
+          <h2>Join an institute</h2>
+          <div className="card">
+            <p style={{ marginTop: 0, fontSize: 13, color: 'var(--muted)' }}>
+              Your account is currently independent. If a coaching institute wants you on their
+              team, enter their login phone number and password below to join — ask their admin
+              for these, the same credentials they use to log into the Institute dashboard.
+            </p>
+            <form className="stack" onSubmit={handleJoinInstitute}>
+              <div>
+                <label>Institute's phone number</label>
+                <input value={instPhone} onChange={(e) => setInstPhone(e.target.value)} required />
+              </div>
+              <div>
+                <label>Institute's password</label>
+                <input type="password" value={instPassword} onChange={(e) => setInstPassword(e.target.value)} required />
+              </div>
+              {joinError && <p className="error">{joinError}</p>}
+              <button type="submit" disabled={joinLoading} style={{ alignSelf: 'flex-start' }}>
+                {joinLoading ? 'Joining…' : 'Join institute'}
+              </button>
+            </form>
+          </div>
+        </>
+      )}
+      {role === 'teacher' && profile && profile.institute_id && (
+        <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: -8 }}>
+          You're part of an institute. Batch access is managed by your institute's admin.
+        </p>
+      )}
 
       {/* 3. Change password — hidden for parent */}
       {role !== 'parent' && (

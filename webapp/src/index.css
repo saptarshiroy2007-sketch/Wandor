@@ -16,13 +16,13 @@
    ============================================================ */
 :root {
   /* Core palette */
-  --paper:       #eee9e0;
-  --ink:         #141414;
-  --signal-red:  #c1272d;
+  --paper:       #f2efe6;
+  --ink:         #111111;
+  --signal-red:  #d62828;
   --ink-blue:    #1f3f8f;
-  --surface:     #f7f4ec;
-  --paper-line:  #d8d2c4;
-  --muted:       #6b6656;
+  --surface:     #f8f6ee;
+  --paper-line:  #d2cec1;
+  --muted:       #6a6963;
 
   /* Derived */
   --accent:      var(--signal-red);
@@ -31,7 +31,7 @@
 
   /* Nav: always dark in both light and dark mode per spec.
      Do NOT use var(--ink) here — it would invert in dark mode. */
-  --nav-bg:            #141414;
+  --nav-bg:            #111111;
   --nav-text:          rgba(255, 255, 255, 0.62);
   --nav-text-active:   #ffffff;
   --nav-text-hover:    rgba(255, 255, 255, 0.88);
@@ -44,8 +44,8 @@
   --highlight-ink:  #4a3a00;
 
   /* Typography */
-  --font-display: 'Cinzel', Georgia, 'Times New Roman', serif;
-  --font-heading: 'Archivo', 'Arial Narrow', sans-serif;
+  --font-display: 'Archivo Variable', 'Archivo', 'Arial Narrow', sans-serif;
+  --font-heading: 'Archivo Variable', 'Archivo', 'Arial Narrow', sans-serif;
   --font-body:    'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono:    'IBM Plex Mono', 'Courier New', monospace;
 
@@ -72,9 +72,6 @@
 body {
   margin: 0;
   background: var(--paper);
-  background-image: linear-gradient(var(--paper-line) 1px, transparent 1px);
-  background-size: 100% 32px;
-  background-attachment: local;
   color: var(--ink);
   font-size: 15px;
   line-height: 1.5;
@@ -92,9 +89,14 @@ h1, h2, h3 {
   color: var(--ink);
 }
 h1 {
-  font-size: 24px;
+  font-size: 34px;
+  font-weight: 900;
+  font-stretch: 70%;
+  line-height: 0.95;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
+  padding-left: 14px;
+  border-left: 8px solid var(--signal-red);
 }
 h2 {
   font-size: 11px;
@@ -132,6 +134,7 @@ a:hover { text-decoration: underline; }
    ============================================================ */
 .card {
   position: relative;
+  border-top: 3px solid var(--ink);
   background: var(--surface);
   border: 1px solid var(--paper-line);
   border-radius: 0; /* hard edges throughout */
@@ -213,9 +216,11 @@ button, .btn {
   letter-spacing: 0.02em;
   cursor: pointer;
   min-height: 44px; /* WCAG 2.5.5 touch target */
-  transition: filter 0.1s;
+  text-transform: uppercase;
+  transition: transform 0.12s, box-shadow 0.12s;
 }
-button:hover { filter: brightness(0.86); }
+button:hover:not(:disabled), .btn:hover { transform: translate(-2px, -2px); box-shadow: 4px 4px 0 var(--ink); }
+button:active:not(:disabled) { transform: none; box-shadow: none; }
 button:disabled { opacity: 0.36; cursor: not-allowed; filter: none; }
 
 button:focus-visible, .btn:focus-visible {
@@ -382,13 +387,16 @@ td { font-family: var(--font-mono); font-size: 13px; }
 
 .brand-mark {
   font-family: var(--font-display);
-  font-size: 19px;
+  font-weight: 900;
+  font-stretch: 70%;
+  font-size: 24px;
   line-height: 1;
-  color: var(--signal-red);
+  color: #fff;
   width: 34px;
   height: 34px;
+  background: linear-gradient(135deg, var(--signal-red) 0 50%, transparent 50%), #111;
   border: 1.5px solid var(--signal-red);
-  border-radius: 50%;
+  border-radius: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -396,10 +404,12 @@ td { font-family: var(--font-mono); font-size: 13px; }
 }
 .brand-word {
   font-family: var(--font-display);
-  font-size: 16px;
-  letter-spacing: 0.06em;
+  font-size: 20px;
+  font-stretch: 70%;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--nav-text-active);
-  font-weight: 400;
+  font-weight: 900;
 }
 
 /* Desktop nav links — flex row in the top bar */
@@ -523,3 +533,28 @@ td { font-family: var(--font-mono); font-size: 13px; }
 }
 
 
+
+/* Printable pages (receipt): hide chrome that shouldn't land on paper. */
+@media print {
+  .no-print { display: none !important; }
+}
+
+/* Grain over the app shell (print-style texture, no layout cost) */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  opacity: 0.06;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+@media (prefers-reduced-motion: reduce) {
+  button, .btn { transition: none; }
+  button:hover:not(:disabled), .btn:hover { transform: none; }
+}
+
+/* Brand on light pages (login screens): nav text colour is white, so override. */
+.page .brand-word { color: var(--ink); display: inline; font-size: 26px; }
+.page .brand { margin-bottom: 4px; }

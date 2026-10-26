@@ -1,5 +1,9 @@
 # Wandor — HANDOFF
 
+> **Billing/payments work: start at the last section, "WHAT TO DO NEXT (billing)".** It is the
+> single up-to-date list of what is done, what is open, and what only the owner can decide.
+> Older "still open" lists further up are annotated where later phases superseded them.
+
 Purpose: paste this into a fresh AI session (or read it yourself later) to pick up
 exactly where this session left off, with zero missing context.
 
@@ -790,7 +794,7 @@ new (migration 0006).
   (not placeholder text anymore) — worth a manual check once a real test is created.
 - The remaining scope-decisions items (2 OTP subsystem, 3 My Profile, 5 scheduling
   robustness/recurrence, 6 iOS) are all still open.
-- The subscription/billing model (last HANDOFF session) remains entirely unimplemented.
+- The subscription/billing model - implemented in the "subscriptions + student fee payments" session at the bottom of this file.
 - Manual Intervention Required items at the top of this file remain unresolved.
 
 ## Failed approaches
@@ -935,3 +939,790 @@ Three sections, all behind `<Layout>` (so the dark nav bar and gear button are p
 - All items from the design system session remain open.
 - My Profile screen with photo upload and completion progress bar (deferred — needs storage design).
 - Content layout (section 3) — still rejected/pending rework.
+
+
+## Follow-up session: subscriptions + student fee payments
+
+Two separate money flows, deliberately kept apart:
+1. **SaaS subscription** - institutes and independent teachers pay the platform (Razorpay Subscriptions).
+2. **Student fees** - students pay their own institute/teacher (Razorpay Orders + Route transfers).
+
+### Subscription model (backend/app)
+- `plans.py` is the ONLY place limits/features/prices live. Tiers: free (25 students, 1 teacher, no online fee collection), basic, pro (unlimited students). **Prices are placeholders** and only affect what the UI displays - the charge amount comes from the Razorpay Plan.
+- `Subscription` table: exactly one owner - `institute_id` OR `teacher_id` (CHECK constraint + unique per owner). An institute-affiliated teacher is never their own payer. No row = Free.
+- `services/subscriptions.py::effective_plan()` decides entitlement in one place: trialing/active/past_due/cancelled rules + `BILLING_GRACE_DAYS`. Never read `Subscription.plan` directly for gating.
+- Limits only block ADDING (students via POST /students, bulk import [skips + reports rows over cap], POST /institute/students, POST /institute/teachers, join-institute). Over-limit existing data is never touched. Plan-limit errors are HTTP 402 with a plain-string `detail`, so every existing page already displays them.
+- New signups get a `TRIAL_DAYS` (14) Pro trial at OTP verification (`start_trial`). Existing accounts have no row -> Free (grandfathered, nothing removed).
+- `routers/billing.py`: GET /billing/plans (public), /billing/me, POST /billing/subscribe | verify | cancel | change-plan. Only an independent teacher or institute admin can manage; an institute's teachers see the plan read-only (`get_billing_actor` in auth.py).
+- Cancel = at cycle end. Change-plan = at next renewal only (no mid-period proration/upgrade-now yet).
+- Subscribing during a trial (or after cancelling paid time) sets `start_at` so nobody is charged for time they already have.
+- Ownership of a Razorpay subscription comes from the `notes` we attach at creation, never from client input; /billing/verify also checks the signature AND that the notes match the caller.
+
+### Student fees (routers/payments.py, rewritten)
+- Before this session NOTHING created a FeeRecord and students had no fee UI. Now: POST /payments/fees (whole batch or specific students), GET /payments/records (with student names), POST /payments/fees/{id}/mark-paid (cash/UPI), DELETE (unpaid only), GET /payments/payout-status; student side: GET /payments/my-fees, POST /payments/create-order, POST /payments/verify.
+- Money routing: `create-order` adds a Route `transfers` entry to the owner's linked account (`Institute.razorpay_account_id`, or `Teacher.razorpay_account_id` for independent teachers), minus `FEE_PLATFORM_COMMISSION_BPS`. **Fee money is never routed to the platform account** - with no linked account (or a plan without `online_fee_collection`) online payment is refused with 409 and the student sees "pay your teacher directly".
+- Linking an account is an operator action: `python -m scripts.set_payout_account --institute-phone ... --account-id acc_...` (verifies the account with Razorpay first). Not self-serve on purpose - whoever can set it controls where fee money goes.
+- Open orders are reused instead of minting a new order per tap.
+- ONE webhook (`POST /payments/webhook`) handles both `subscription.*` and `payment.captured`/`order.paid`. Signature-verified; **refuses (503) if RAZORPAY_WEBHOOK_SECRET is empty** (an empty HMAC key is forgeable); `webhook_events` table makes redelivery idempotent. Subscription events re-fetch the current state from Razorpay rather than trusting the payload snapshot.
+
+### Migration / env / packages
+- Migrations `0013` (subscriptions, webhook_events, `razorpay_account_id` on institutes+teachers, fee_records.description/payment_mode/created_at) and `0014` (fee_records.duplicate_payment_id). Verified on a real PostgreSQL 16: up -> down -> up, `alembic check` reports zero drift vs models.py, and the one-owner CHECK constraint is enforced. NOT yet run on your production DB. **See the warning below about the older migration chain.**
+- New env: RAZORPAY_PLAN_{BASIC,PRO}_{MONTHLY,YEARLY}, TRIAL_DAYS, BILLING_GRACE_DAYS, FEE_PLATFORM_COMMISSION_BPS (see .env.example).
+- requirements.txt: added `setuptools<81` (razorpay 1.4.2 imports pkg_resources).
+
+### Frontend (webapp/src)
+- New `pages/Billing.tsx` at /billing (teacher + institute_admin; linked from Settings and the institute dashboard). New `lib/razorpay.ts` Checkout helper.
+- `Payments.tsx` rewritten: add fees to a batch/student, names instead of UUIDs, paid/unpaid filter, mark paid, delete, payout-status banner. `StudentHome.tsx` gained a Fees section with Pay now.
+
+### To go live (checklist)
+1. Razorpay dashboard: create 4 Plans (amount/period matching plans.py), paste the plan_ ids into env; blank = not purchasable.
+2. Razorpay dashboard: webhook -> `<backend>/payments/webhook`, events: payment.captured, order.paid, **refund.processed** (added in Phase 3 - without it refunds never update the app), subscription.activated/charged/pending/halted/cancelled/completed. Set RAZORPAY_WEBHOOK_SECRET.
+3. Enable **Route** on the Razorpay account, then create + KYC each institute's/teacher's linked account and run set_payout_account.
+4. `alembic upgrade head` on production.
+5. Decide real prices/limits in plans.py.
+6. **(added Phase 3)** Meta Business Manager: create + get approved the WhatsApp templates `fee_created` (4 variables) and `payment_receipt` (4 variables) - exact variables in the Phase 3 entry. Until approved, fee/receipt notices fall back to SMS (costs money).
+7. **(added Phase 1)** Set `FEE_PLATFORM_COMMISSION_BPS` (0 = every online fee payment costs you Razorpay's fee; a startup warning logs this). Rate limits: `RATE_LIMIT_*` in `.env.example`.
+8. `alembic upgrade head` now also applies `0015` (fee payment ledger + backfill) - see Phase 3.
+
+### Verification actually done
+- `python -m tests.test_billing_flow` - 13 end-to-end tests with a FAKE Razorpay client, passing on both SQLite and PostgreSQL 16 (`TEST_DATABASE_URL=postgresql+psycopg://... python -m tests.test_billing_flow`). Covers trial, caps, subscribe/verify/webhook/idempotency, cancel, change-plan, fee routing payload, cross-tenant access, odd webhooks. Deliberate mutations (remove student cap, wrong payout account, grant access on pending) each made the suite fail, and the 4 review-round gaps below each FAILED before their fix.
+- Frontend: `tsc --noEmit` clean, `vite build` succeeds.
+- **NOT verified**: any call to the real Razorpay API (Subscriptions, Route transfers, `subscription.edit` with `schedule_change_at`), the Checkout popup, or a real webhook. First test-mode run against real Razorpay keys is the next step.
+
+### Still open / known gaps
+- Route onboarding is manual (no self-serve KYC flow / bank-detail capture).
+- No proration or "upgrade now"; no invoice list; no GST invoices for subscription charges. **[STILL OPEN - billing Phase 4]**
+- No platform-admin panel (payout accounts, comps/overrides are CLI/DB only).
+- A teacher who joins an institute must cancel their personal subscription first (enforced), but their old Subscription row is left in place.
+- Partial fee payments aren't supported (a fee is paid in full or not at all). **[DONE in billing Phase 3]**
+
+
+### Review round 2 (gap audit) - found, reproduced with a failing test, then fixed
+1. **Double subscription during a trial.** Subscribing mid-trial defers the first charge (Razorpay status `authenticated`), which was not recorded, so the UI showed nothing and the customer could subscribe again = two live subscriptions. Now the pending subscription is linked (shown as "starts after trial", cancellable, a second subscribe is a 409).
+2. **Old subscription kept charging.** When a new subscription activated over an old one, the old Razorpay subscription was never cancelled. Now cancelled best-effort after commit (`cancel_superseded`; failure logs `SUPERSEDED_SUBSCRIPTION_NOT_CANCELLED` - cancel it in the Razorpay dashboard).
+3. **Failed-payment dead end.** A halted (past_due) subscription blocked re-subscribing and the UI offered nothing. Now allowed ("Start new subscription"); cancelling a past_due/pending subscription cancels immediately.
+4. **Orphaned fee payments.** Two open orders for one fee (double-tap / two devices) left the earlier order's payment unmatched. Webhook + verify now fall back to the order's `receipt` (= fee id), guarded so a non-UUID receipt can't crash Postgres.
+5. **Silent double payment.** Cash recorded while the student's online order was still open -> second payment ignored. Now stored in `fee_records.duplicate_payment_id`, logged as `DUPLICATE_FEE_PAYMENT`, and shown to the teacher as "Paid twice - refund needed" (**Phase 3: now "Overpaid - refund needed", covers any money beyond what is owed, and clears itself when the refund completes**).
+6. Billing UI no longer claims "You're on Pro" when Razorpay hasn't confirmed the charge yet (UPI lag).
+
+### WARNING: the older migration chain does not run on an empty PostgreSQL
+`alembic upgrade head` from scratch fails at 0001 (enum `classstatus` created twice; needs `create_type=False`) and again at 0005 (UUID/String foreign-key mismatch), and there are probably more. It only "works" on SQLite. Production must have been created some other way (`create_all` + stamp?). I did not repair history. Do NOT rely on a from-scratch `alembic upgrade head` on a new Postgres until that is fixed; for an existing DB at 0012, `alembic upgrade head` applies 0013+0014 (verified above).
+
+### Decisions still yours (business/planning, not code bugs)
+- **Gateway cost on fee payments.** Razorpay's fee on each student fee payment is charged to the PLATFORM, and with `FEE_PLATFORM_COMMISSION_BPS=0` the institute gets 100% - so every fee payment costs you money. Set a commission (or pass the fee on) before enabling online fees. Refunds also come out of the platform's Razorpay balance unless refunded with `reverse_all`.
+- **GST.** Subscription prices should be GST-inclusive or GST added on top; decide, and issue invoices. Note UPI Autopay debits above Rs 15,000 need the customer's PIN each time (Razorpay docs), so a GST-inclusive yearly price over that will see more failed renewals; the Pro yearly placeholder (Rs 14,990) sits just under it.
+- **[DONE in billing Phase 2]** **Parents can't pay.** The parent portal shows fees but has no Pay button, and for minors the parent is usually the payer. Adding it = reuse create-order/verify behind `get_current_parent`. Recommended next.
+- **[DONE in billing Phase 3: refund webhook, receipts, fee-created notice, partial payments. Refunds are still ISSUED from the Razorpay dashboard.]** **Refund handling is manual** (no refund webhooks / status reversal), and there are no fee receipts, no notification when a fee is created, no partial payments.
+- **[DONE in billing Phase 1]** **Free plan still sends fee-reminder WhatsApps** (each costs money) - gate it if that matters.
+- **[DONE in billing Phase 1 for create-order, subscribe, change-plan; verify endpoints and the rest of the app are still unlimited]** No rate limiting on create-order / subscribe (project-wide gap, not specific to billing).
+- Deleting an unpaid fee while a student's order is open would orphan that payment (logged as `ORPHAN_FEE_PAYMENT`).
+
+
+---
+
+## Follow-up session: billing Phase 1 - harden what exists
+
+**Plan:** billing work is split into 5 phases (1 harden, 2 parent pays, 3 fee lifecycle,
+4 subscription completeness, 5 go live). This entry is Phase 1. Each phase ends with tests,
+`tsc`, `vite build` and a HANDOFF entry.
+
+**Asked for:** rate limit `create-order` and `subscribe`; gate fee-reminder WhatsApps on Free;
+decide the platform commission.
+
+### 1. Rate limiting - DONE
+- New `app/ratelimit.py`: sliding-window limiter, keyed by the caller's **verified JWT subject**
+  (falls back to client IP only when there is no valid token). Per person, so a whole coaching
+  centre behind one IP is never throttled together. Over limit -> HTTP 429, `Retry-After` header,
+  plain-string `detail` (existing pages already render it).
+- Applied to: `POST /payments/create-order` (10/min per student), `POST /billing/subscribe` and
+  `POST /billing/change-plan` (5/min per account, separate bucket each). `change-plan` was added
+  beyond the ask because it also calls Razorpay.
+- Settings (`database.py`, `.env.example`): `RATE_LIMIT_ENABLED` kill switch,
+  `RATE_LIMIT_PAYMENT_PER_MIN`, `RATE_LIMIT_BILLING_PER_MIN`. `0` = unlimited for that bucket.
+- **Limitation:** counters live in process memory. N workers/instances = up to N x the limit.
+  Fine on one instance; move to Redis before scaling out. Memory is bounded (stale keys purged
+  past 20k keys).
+- Not covered: `/billing/verify` and `/payments/verify` (signature-checked, no Razorpay create
+  call), and every non-billing endpoint (login, OTP) - project-wide rate limiting is still open.
+
+### 2. Free-plan fee reminders gated - DONE
+- `plans.py`: new feature flag `fee_reminders` (Free = False, Basic/Pro = True; trial = Pro so
+  trialing owners get them). Exposed as `fee_reminders` on `GET /billing/plans` and
+  `GET /billing/me`.
+- `services/fee_reminders.py`: per fee, resolve the owner and check the flag (one lookup per
+  owner per pass). Skipped fees are NOT touched (`last_reminder_sent_at` unchanged), so they
+  resume the day the owner upgrades. Summary gained `skipped_plan`. A student with no owner
+  is treated as not entitled.
+- `POST /payments/send-reminders-now`: Free owner now gets HTTP 402 with a plain message
+  instead of a silent "sent 0". The daily cron just skips them.
+- Frontend: `Payments.tsx` shows the 402/429 message next to the button (the old handler had
+  no catch, so an error would have shown nothing) plus a "skipped" count; `Billing.tsx` shows
+  "Fee reminders on/off" and per-plan reminder line; `client.ts` types updated.
+- Behaviour change to know about: existing Free-plan users stop receiving reminders on deploy.
+
+### 3. Commission - NOT DECIDED, left at 0
+- You did not give a number, so `FEE_PLATFORM_COMMISSION_BPS` stays 0. Razorpay's fee on every
+  online fee payment is charged to the platform, so at 0 each online payment costs money.
+- Added: a startup WARNING log when a Razorpay key is set and commission is 0, and a comment
+  in `.env.example`. Verified it fires at 0 and stays silent at 200.
+- **Open decision:** pick a value covering Razorpay's fee + GST on that fee before enabling
+  online fees for real institutes. Code already clamps to 0-5000 bps.
+
+### Verified
+- `python -m tests.test_billing_flow`: 19 pass (13 old + 6 new, SQLite, fake Razorpay).
+  New: create-order limit (per-user, kill switch, 0 = unlimited), blocked call makes no
+  Razorpay request, subscribe/change-plan limits with separate buckets, forged tokens don't
+  get private buckets, Free skipped then reminded after upgrade + dedupe + trial + institute
+  mix, plan catalog exposes the flag.
+- Mutation-checked: removing the limiter from create-order, removing it from subscribe,
+  removing the reminder gate, removing the manual-endpoint 402 each made the suite fail.
+- `tsc --noEmit` clean, `vite build` clean. `py_compile` clean on all edited backend files.
+- No migration needed (no schema change).
+- **NOT verified:** Postgres run of the new tests (only SQLite this session), real
+  WhatsApp/Razorpay, or the UI in a browser.
+
+### Still open after Phase 1
+Phases 2-5 and the commission decision. (Phase 2 is the next entry below.)
+
+
+---
+
+## Follow-up session: billing Phase 2 - parents can pay
+
+**Asked for:** let a parent pay their child's fees from the parent portal (the biggest gap in
+the original handoff: a parent was the likeliest payer but had no Pay button).
+
+### What was built - DONE
+- **No duplicated payment logic.** `routers/payments.py` now has three shared helpers that
+  take the `Student` the caller is scoped to: `my_fees_for`, `create_order_for`,
+  `verify_payment_for`. The student routes (`/payments/my-fees`, `/create-order`, `/verify`)
+  are thin wrappers over them - behaviour unchanged (all 19 earlier tests still passed right
+  after the refactor, before any parent code existed).
+- **New parent routes** in `routers/parents.py`, parent token only:
+  - `GET  /parents/my-fees` - fees (with description/paid-on) + `online_payment_available`
+  - `POST /parents/create-order` - own rate-limit bucket `parent-create-order`, same
+    `RATE_LIMIT_PAYMENT_PER_MIN` setting
+  - `POST /parents/verify`
+  - The old `GET /parents/fees` is kept untouched for compatibility; the dashboard no longer
+    uses it.
+- **Who can touch what:** a parent token resolves (via `get_current_parent`) to exactly one
+  child, so only that child's fees are reachable. A student/teacher/no token on parent routes
+  -> 401; a parent token on the student's `/payments/*` routes -> 401.
+- Money flow is identical to a student paying: Route transfer to the institute/teacher's linked
+  account minus commission, same idempotent mark-paid, same webhook, same duplicate-payment
+  flag. Parent and child tapping Pay on the same fee reuse the one open order.
+- **Frontend:** new shared `components/PayableFees.tsx` (fee cards + Checkout flow) used by BOTH
+  `StudentHome.tsx` and `ParentDashboard.tsx`. Parent Checkout description is prefixed with the
+  child's name. `client.ts`: `getChildFeesPayable`, `createParentPaymentOrder`,
+  `verifyParentFeePayment`.
+- UI changes you will notice: the parent fee list is now cards (same as the student's), not a
+  table, so the separate "Amount paid" column is gone; offline hint reads "Pay the teacher
+  directly" (was "Pay your teacher directly" on the student page).
+
+### Verified
+- `python -m tests.test_billing_flow`: **25 pass** (19 + 6 new, SQLite, fake Razorpay). New:
+  full parent pay flow incl. webhook-after and no duplicate flag; cross-family isolation (can't
+  create an order for or verify a payment against another child's fee, even a validly signed
+  one); wrong-role matrix; Free plan / no payout account -> 409 and `online_payment_available`
+  false; separate rate-limit bucket; legacy `/parents/fees` still works.
+- Mutation-checked: removing the ownership check in verify, dropping the student filter in
+  create_order_for, removing the parent rate limit, and swapping parent auth for student auth
+  each made the suite fail.
+- `tsc --noEmit` clean, `vite build` clean. No migration (no schema change).
+- **NOT verified:** UI in a browser; a real Razorpay Checkout opened from the parent page;
+  Postgres run of the new tests.
+
+### Known limits / left for later
+- No record of WHO paid (parent vs student) - `payment_mode` is just "online". Phase 3 receipts
+  would be the place to add it if wanted.
+- Parent still cannot see receipts, or pay part of a fee (Phase 3).
+- The parent's phone is not prefilled in Checkout (kept identical to the student flow rather
+  than add an unverified Razorpay field).
+
+### Still open after Phase 2
+Phases 3-5 and the commission decision. (Phase 3 is the next entry below.)
+
+
+---
+
+## Follow-up session: billing Phase 3 - fee lifecycle
+
+**Asked for:** fee-created notice, receipts, refund webhooks, partial payments (all four in
+one phase; partial payments was the big one).
+
+### The foundation: a payment ledger - DONE
+- New table `fee_payments` (model `FeePayment`): one row per payment or payment attempt.
+  `status` pending|paid, `amount_paise` and `refunded_paise` (integers, exact), `mode`
+  online|manual, Razorpay order/payment ids, `paid_by` student|parent|teacher.
+- `FeeRecord.amount_paid / is_paid / paid_at` are now a **cache** of the ledger. The ONLY code
+  allowed to change them is `services/fee_ledger.py` (`capture`, `record_manual`,
+  `apply_refund`, `recompute`). Do not set them by hand anywhere else.
+- Every Razorpay order we create now gets a `pending` ledger row, so the amount and who opened
+  it are known when the payment lands. `_payment_for_order` finds it (row locked on Postgres);
+  orders with no row (made before this deploy) fall back to the order's `receipt` = fee id.
+- Overpayment is never swallowed: if net received exceeds what is owed (stale order paid,
+  online payment after cash, etc.) `duplicate_payment_id` is set; it **clears itself** when
+  refunds bring the net back down. UI label is now "Overpaid - refund needed".
+- **Migration `0015`** adds the table and `fee_records.allow_partial` (default false) and
+  backfills one `paid` ledger row per fee that has money on it. A fee already flagged duplicate
+  keeps the flag but gets no ledger row (the extra amount was never recorded); a refund of that
+  payment still clears the flag.
+
+### 1. Partial payments - DONE
+- Teacher sets "Let them pay in instalments online" per fee (`allow_partial`). Default is
+  pay-in-full, exactly as before.
+- `POST /payments/create-order` and `/parents/create-order` take optional `amount`. Rules: only
+  if `allow_partial`; <= balance; >= Rs.1; and the leftover must be 0 or >= Rs.1 (Razorpay's
+  minimum, so no unpayable crumbs). Open orders are reused only for the same amount. The Route
+  transfer and commission are computed per instalment.
+- Teacher can ALWAYS record a part-payment by hand: `POST /payments/fees/{id}/mark-paid` takes
+  optional `{amount}` (no body = whole balance, unchanged).
+- Fees with money received can't be deleted (400). Abandoned checkout rows go with the fee.
+- Reminders keep working: a part-paid fee is still unpaid, reminded for the remaining amount.
+
+### 2. Receipts - DONE
+- `GET /payments/receipts/{id}` (teacher, own students), `/payments/my-receipts/{id}` (student),
+  `/parents/receipts/{id}` (parent's child). 404 for anyone else and for unpaid attempts.
+- Receipt number is derived from the payment id (`R-` + 10 chars), nothing extra stored.
+  New printable page `/receipt/:paymentId` (print / save as PDF). Receipt links appear on the
+  student, parent and teacher fee lists. Fee lists now show each payment, who paid
+  (`paid_by` = whoever completed Checkout, not whoever opened the order), and refunds.
+
+### 3. Refund webhook - DONE
+- Handles `refund.processed`. Takes the payment's **cumulative** `amount_refunded` from Razorpay
+  (`payment.fetch`) rather than adding the event amount, so replays and multiple partial
+  refunds converge. If Razorpay can't be reached it answers **503** (nothing committed, so
+  Razorpay retries). Refund total is clamped to the payment amount.
+- A refund puts the fee back to unpaid if it drops below what is owed (`paid_at` cleared,
+  reminders resume, payer can pay again). Refunds are still ISSUED from the Razorpay dashboard;
+  there is no refund button in the app.
+- **You must add `refund.processed` to the events ticked on the Razorpay webhook.**
+
+### 4. Fee-created notice + receipts by message - DONE (gated, unverified live)
+- `services/fee_notices.py`: "new fee" notice on fee creation, receipt message on every received
+  payment (online or recorded by hand), to student and parent. Runs as FastAPI background tasks
+  after the response and commit, in its own DB session: a failing provider can never fail or slow
+  a payment (tested). Receipts are sent once per payment even though verify and webhook both
+  report it.
+- Paid plans only, same `fee_reminders` flag as Phase 1 (label now "reminders & notices").
+  **Free users get none.**
+- `notify()` gained `template_params` (fills WhatsApp template body variables).
+- **ACTION REQUIRED in Meta Business Manager** - create and get approved, with exactly these
+  body variables, or WhatsApp rejects the message and it falls back to **SMS (costs money)**:
+  - `fee_created`: {{1}} student {{2}} amount {{3}} due date {{4}} description or "-"
+  - `payment_receipt`: {{1}} student {{2}} amount {{3}} receipt no {{4}} balance note
+
+### Verified
+- `python -m tests.test_billing_flow`: **36 pass** (25 old + 11 new). New cover: student then
+  parent part-paying one fee, part-payment rules, manual part-payments + delete rules,
+  abandoned orders, stale-order overpayment + flag clearing, refund idempotency/partial/full,
+  refund edge cases (unknown payment, Razorpay down -> 503 then retry works, clamp, legacy flag),
+  receipt content + isolation across student/parent/teacher, notices (Free silent, paid plan
+  student+parent, exactly once, failing provider harmless), `paid_by`, and a messy mixed sequence
+  where the cached totals are checked against the ledger after every step.
+- `python -m tests.test_migration_0015` (SQLite): schema, backfill of online/manual/no-mode/
+  duplicate fees, ledger == cached totals, downgrade, re-upgrade.
+- Mutation-checked (each break made a test fail): capture idempotency, refunds in net, refund
+  clamp, flag clearing, partial rule, leftover-under-Rs.1 rule, receipt scoping, delete-with-
+  payments, refund 503, notice plan gate, verify ownership, `paid_by`; and in the migration
+  the unpaid-fee filter, online/manual detection, paise conversion.
+- `tsc --noEmit` clean, `vite build` clean.
+- **NOT verified:** a real Razorpay order/refund; real WhatsApp/SMS; Postgres (the migration and
+  `with_for_update` were only run on SQLite); the UI in a browser (Pay with amount box, receipt
+  page, teacher "Record payment" prompt).
+
+### Known limits / watch for
+- Existing daily overdue reminder sends template `fee_reminder` with NO variables, so WhatsApp
+  users see only that template's fixed text; amounts appear only in the SMS fallback. Not
+  changed here.
+- `/payments/verify` and `/parents/verify` still have no rate limit (Phase 1 note).
+- Two payers racing partial orders can overpay; that is flagged, not prevented.
+- Pending (abandoned) ledger rows accumulate; harmless, could be pruned later.
+- Teacher "Record payment" uses a browser prompt box - functional, not pretty.
+
+### Still open (next: Phase 4 - subscription completeness)
+Upgrade-now/proration, invoice list, GST decision (inclusive vs on top). Then Phase 5 go-live
+(migration chain on empty Postgres, real Razorpay test-mode run, checklist), plus the commission
+decision from Phase 1.
+
+
+---
+
+## Follow-up session: billing Phase 4.0 - cheap fixes before Phase 4 proper
+
+Phase 4 (subscription completeness) is being delivered in parts so a session that runs out of
+budget still leaves a consistent repo + HANDOFF. Plan: **4.0** cheap fixes (this entry) -> **4.1**
+GST + invoice table/migration -> **4.2** invoice list API (from `subscription.charged` webhook)
+-> **4.3** upgrade-now with proration (backend) -> **4.4** Billing UI (invoices, upgrade-now,
+"+ GST" copy). Each part ends with tests and its own entry here.
+
+### Owner decisions recorded (from the planning chat; confirm if either has changed)
+- **GST is added on top**: price shown as "Rs X + 18% GST". Store base, GST and total as separate
+  columns on each invoice; proration runs on the BASE, GST is computed after.
+- **Commission stays 0 for v1.** Razorpay's fee on each Route fee payment then comes out of the
+  platform's side. Check the real deduction in the Phase 5 test-mode run before launch; a small
+  `FEE_PLATFORM_COMMISSION_BPS` (e.g. 50) is the lever if it hurts.
+- "Free plan" for reminder gating means trial expired / no paid plan (gating already goes through
+  `effective_plan()`/`has_feature`, never a plan name).
+
+### What changed
+1. **Rate limit on the three verify endpoints** (`POST /payments/verify`, `POST /parents/verify`,
+   `POST /billing/verify`). New setting `RATE_LIMIT_VERIFY_PER_MIN` (default 20, 0 = unlimited,
+   covered by the existing `RATE_LIMIT_ENABLED` kill switch). Each endpoint has its own bucket, keyed
+   by user id. Blocked calls never reach Razorpay. NOTE: the limiter falls back to
+   `request.client.host` only for unauthenticated calls; these endpoints are all authenticated so
+   Render's proxy IP is not an issue here, but it WILL be for login/OTP limiting (not done yet) -
+   run uvicorn with `--proxy-headers --forwarded-allow-ips='*'` (or equivalent) when that is added.
+2. **Overdue reminder amount** (`services/fee_reminders.py::reminder_template`). The old
+   `fee_reminder` template has no variables, so WhatsApp users never saw the amount (SMS did). Now
+   two settings: `FEE_REMINDER_TEMPLATE` (default `fee_reminder`) and `FEE_REMINDER_TEMPLATE_VARS`
+   (default `false`). Default behaviour is unchanged on purpose - Meta rejects variables sent to a
+   template that has none. **To actually fix it:** create+approve a Meta template (suggested
+   `fee_reminder_v2`) with 4 body variables `{{1}} student {{2}} amount owed {{3}} due date
+   {{4}} "was due"/"is due"`, then set `FEE_REMINDER_TEMPLATE=fee_reminder_v2` and
+   `FEE_REMINDER_TEMPLATE_VARS=true`.
+3. README: parent-login line was stale, fixed. (The other HANDOFF/README staleness reported earlier
+   - `refund.processed` in the checklist, partial payments, "Overpaid", billing section - was already
+   corrected in the Phase 3 files; re-checked.)
+
+### Verified
+- `python -m tests.test_billing_flow`: 38 pass on SQLite (36 before + 2 new). The older reminder
+  test's notify stub was widened to accept the new `params` argument.
+- Mutation checks, each restored and diffed afterwards: removing the parent-verify limit fails
+  `test_verify_endpoints_are_rate_limited_...`; always sending template variables fails
+  `test_overdue_reminder_whatsapp_variables_only_when_template_has_them`.
+- NOT verified: a real WhatsApp send of the v2 template (needs Meta approval), Postgres run.
+
+### Heads-up found while reading Razorpay docs (affects 4.3 and the EXISTING change-plan)
+Razorpay's "Update a Subscription" API errors with "Subscriptions cannot be updated when payment
+mode is UPI". `POST /billing/change-plan` calls `subscription.edit(...)`, so for customers who
+authorised UPI Autopay it will currently return 502. Phase 4.3 must not depend on `subscription.edit`
+succeeding; Phase 5's test-mode run must try change-plan with a UPI-authorised subscription.
+
+### Stale copy in the zip
+`wandor/wandor/` inside the uploaded zip is an OLDER duplicate of the whole repo (937-line HANDOFF).
+It was not touched. Work happens in the outer `wandor/`; delete the inner copy when convenient.
+
+---
+
+## Follow-up session: billing Phase 4.1 - GST + invoice table, migration 0016, numbering
+
+Foundations for invoices. **Nothing calls the new code yet** - no endpoint creates or lists invoices;
+Phase 4.2 wires `issue_invoice()` to the `subscription.charged` webhook and adds the list API.
+Owner decision applied: **GST is added on top** (18%), base/GST/total stored separately.
+
+### What changed
+1. **`services/invoices.py` (new)** - all the money rules in one place:
+   - `gst_on_top(base)` -> (gst, total); `split_inclusive(total)` -> (base, gst); `price_breakdown(plan, cycle)`.
+     Integer paise only. Rounding is half-up on the GST amount, so base + GST == total exactly. Backing GST
+     out of a total returns the original base for every whole-paisa amount (checked for 0, 5, 12, 18, 28%).
+   - `financial_year_label()` - April-March decided in **IST** (18:30 UTC on 31 Mar is already 1 Apr).
+   - `next_invoice_number()` - `WND/2627/000001` (prefix/FY/6-digit seq, <= 16 chars as GST rules require).
+     One row-locked counter per financial year; consecutive, restarts each FY, and a rolled-back issue gives
+     its number back (number + invoice insert share one savepoint).
+   - `issue_invoice(db, sub, plan=, cycle=, total_paise= | base_paise=, razorpay_payment_id=...)` - idempotent
+     on `razorpay_payment_id` (webhook redelivery / webhook-vs-verify race returns the existing invoice, burns
+     no number). **Pass `total_paise=` for a real Razorpay charge** (the invoice then matches the money that moved,
+     even if prices or the rate change later). Pass `base_paise=` only for amounts WE compute (4.3 proration:
+     proration on the BASE, GST after). Flushes, does not commit - the caller commits.
+2. **`models.py`: `Invoice`, `InvoiceCounter`.** DB-level CHECKs: `total = base + gst`, amounts >= 0; UNIQUE
+   `invoice_number` and `razorpay_payment_id`. Each invoice snapshots `gst_rate_bps`. `kind` (default
+   `subscription`) lets 4.3 add `proration` invoices without a schema change. Invoices are append-only.
+3. **Migration `0016_invoices_and_gst.py`** - two new tables, nothing altered, nothing backfilled. Charges made
+   before this migration have **no invoice**.
+4. **Plan catalog (`GET /billing/plans`)**: existing `price_monthly` / `price_yearly` are unchanged and are now
+   documented as BASE rupees excluding GST. New fields: `gst_rate_percent`, `gst_monthly_paise`,
+   `total_monthly_paise`, `gst_yearly_paise`, `total_yearly_paise`. Frontend untouched (new fields are additive;
+   `Billing.tsx` still shows the base price with no "+ GST" - that copy is Phase 4.4).
+5. **Settings**: `GST_RATE_BPS` (default 1800), `INVOICE_PREFIX` (default `WND`) in `database.py` + `.env.example`.
+6. Tests: `test_migration_0015.py` now also drops the 0016 tables before replaying (the models include them) and
+   no longer pins head to 0015. README: test list + GST pricing note.
+
+### !! Razorpay Plans must now be created at base + GST
+The charge amount comes from the Razorpay Plan, not from `plans.py`. With GST on top, the placeholder prices mean:
+Basic Rs 588.82/mo (58882 paise), Rs 5,888.20/yr; Pro Rs 1,768.82/mo, Rs 17,688.20/yr. Use the `total_*_paise`
+values from `GET /billing/plans` when creating the 4 Plans. **Pro yearly (Rs 17,688.20) is above Rs 15,000**, the
+UPI Autopay no-PIN limit noted in section A - decide: lower the Pro yearly base to <= Rs 12,711 (so total <= Rs 15,000),
+or accept a PIN on each yearly debit. Not changed, prices are placeholders.
+
+### Verified
+- `python -m tests.test_billing_flow`: **49 pass on SQLite** (38 before + 11 new). `python -m tests.test_migration_0015`
+  and `python -m tests.test_migration_0016`: pass.
+- **PostgreSQL 16.2** (real server): all 11 new tests pass, including a real-thread test
+  (`test_concurrent_issuers_get_gap_free_unique_numbers_postgres_only`): 8 simultaneous issuers on a brand-new
+  financial year get exactly 1..8, and 6 racing on the same payment produce one invoice and use one number.
+  Migration 0016 up -> down -> up on Postgres, `alembic check` = "No new upgrade operations detected".
+  Skipped automatically on SQLite. Run: `TEST_DATABASE_URL=postgresql+psycopg://... python -m tests.test_billing_flow`.
+- Mutation checks (one guard broken at a time, originals restored and diffed): round-down GST, round-down split,
+  ignoring IST, one global counter, re-raising on a lost race, no savepoint (number leaks), accepting a >16-char
+  number, dropping the total CHECK, dropping UNIQUE on payment id - each made a test fail.
+- NOT verified: `tsc` / `vite build` (frontend untouched), anything against real Razorpay.
+
+### Found while running the suite on PostgreSQL (PRE-EXISTING, not caused by 4.1)
+The untouched Phase 4.0 code fails **2 tests on Postgres** and passes them on SQLite:
+`test_parent_cannot_touch_another_childs_fee` and `test_receipts_content_and_isolation`. Both send a malformed id
+(`"nope"`) where a UUID is expected; SQLite just finds no row (404) but Postgres raises `DataError`, so the app
+returns **500 instead of 404** for a malformed fee/payment id (seen on `POST /parents/create-order` and the receipt
+route; other id-taking routes likely behave the same). Harmless to data, but fix it in Phase 5 (validate the id as a
+UUID before querying, or catch `DataError` -> 404) and re-run the suite on Postgres. Everything else passes there.
+
+### Stale copy in the zip (update)
+The `wandor-phase3.zip` handed over contained a nested `wandor/wandor/` (an older duplicate repo, 83 files). The
+`wandor-phase4_0.zip` did not. The 4.1 zip does not contain it either. If you ever see it again, delete it.
+
+---
+
+## Follow-up session: billing Phase 4.2 - invoices from the charge webhook + invoice list API
+
+Every successful subscription charge now becomes an invoice, and the Billing owner can list them. Backend
+only; the frontend is untouched (4.4).
+
+### What changed
+1. **`subscription.charged` webhook creates the invoice** (`routers/payments.py` -> `services/invoices.py::issue_for_charge`).
+   Razorpay's docs confirm this event carries BOTH a subscription entity (with `current_start`/`current_end`) and a
+   payment entity. Rules, each pinned by a test:
+   - Built from the amount **actually charged** (`payment.amount`, `total_paise=`); GST is backed out of it.
+   - Dated and numbered by the **payment's own `created_at`** (not when the webhook arrived), so a delayed delivery
+     around 31 March still lands in the right financial year.
+   - **Plan/cycle and period come from the event's own subscription snapshot**, not the later `subscription.fetch`
+     the handler uses for subscription STATE - so a renewal that switched plans is invoiced for the plan billed.
+   - Skipped (acknowledged with 200, and logged) when there is nothing to invoice: no payment entity
+     (`CHARGED_EVENT_WITHOUT_PAYMENT`), payment not `captured` (`CHARGE_NOT_CAPTURED`), zero/non-integer/bool amount
+     (`CHARGE_BAD_AMOUNT`), non-INR (`CHARGE_NOT_INR`).
+   - Row lookup: by Razorpay subscription id, then by the owner stamped in `notes` - so a late charge on a
+     subscription the customer has since replaced is still invoiced to them. No notes / two owners = not guessed at.
+   - **`INVOICE_AMOUNT_MISMATCH` warning** when the charge differs from catalog base + GST. This is how a Razorpay Plan
+     created at the base price (forgetting GST) shows up. The invoice is still issued for what was really charged.
+   - Idempotent per payment: webhook redelivery, a new event id for the same payment, or two racing deliveries give one
+     invoice and burn one number.
+2. **A failing invoice can never fail the webhook** (`_issue_charge_invoice`, runs in a savepoint). All Razorpay events
+   share one endpoint and Razorpay disables an endpoint that keeps erroring, which would also stop fee-payment events.
+   On any error the subscription update still lands, Razorpay gets 200, and `INVOICE_NOT_ISSUED payment=pay_xxx ...` is
+   logged at ERROR level. **Watch the logs for `INVOICE_NOT_ISSUED`** - each one is a charge with no tax invoice. To fix one:
+   ```
+   python -c "from app.database import SessionLocal; from app.models import Subscription; from app.services import invoices; \
+     db=SessionLocal(); sub=db.query(Subscription).filter_by(razorpay_subscription_id='sub_...').one(); \
+     invoices.issue_invoice(db, sub, plan='basic', cycle='monthly', total_paise=58882, razorpay_payment_id='pay_...'); db.commit()"
+   ```
+   (Redelivering the event from the Razorpay dashboard also works once the cause is fixed - issuing is idempotent.)
+3. **`GET /billing/invoices`** (`limit` 1-200 default 50, `offset`; newest first) and **`GET /billing/invoices/{id}`**.
+   Response model `InvoiceOut`: number, kind, plan + label, cycle, description, `base_paise`, `gst_rate_percent`,
+   `gst_paise`, `total_paise`, currency, period start/end, `issued_at`. **Managers only** - the institute admin or an
+   independent teacher; a teacher who belongs to an institute gets 403. Scoped through the caller's one Subscription row;
+   another owner's invoice is a 404, and **a malformed id is a 404 too** (validated as a UUID first - on Postgres a
+   non-UUID string would otherwise raise a 500; see the PRE-EXISTING note in the 4.1 entry).
+4. `plans.py`: `PAID_PLAN_KEYS`, `CYCLE_KEYS`. No migration (0016 already has everything).
+
+### Verified
+- `python -m tests.test_billing_flow`: **58 pass on SQLite** (49 + 9 new). Migration tests 0015 and 0016 pass.
+- **PostgreSQL 16.2**: all 9 new tests pass; the only 2 failures are the same pre-existing malformed-id 500s as before
+  (`test_parent_cannot_touch_another_childs_fee`, `test_receipts_content_and_isolation`). With the UUID guard removed the
+  new scoping test fails on Postgres (and, as expected, not on SQLite) - so the guard is genuinely needed.
+- Mutation checks (one guard at a time, originals restored and diffed): 12 of 13 caught - not-captured / bad amount / non-INR
+  accepted, receipt-time dating, no owner-notes fallback, no mismatch warning, plan from fetch instead of snapshot,
+  invoice failure failing the webhook, unscoped list, unscoped detail, members allowed, wrong ordering. The 1 miss is the
+  `db.flush()` before the row lookup: it is belt-and-braces (the notes lookup finds the row anyway), no test can tell.
+- NOT verified: a real Razorpay `subscription.charged` delivery. The code reads `payment.entity.id/amount/currency/status/
+  created_at` (Razorpay's standard payment entity) and `subscription.entity.current_start/current_end/plan_id/notes`; the docs
+  show both entities and the period fields, but the payment fields come from the standard entity, not a captured live payload.
+  Phase 5 test-mode run: fire a real charge and look at the invoice + the logs for `INVOICE_AMOUNT_MISMATCH`.
+
+### Known limits (not bugs)
+- `/billing/verify` (the browser right after Checkout) does NOT create an invoice - only the webhook does, so the first
+  invoice appears when the webhook lands (normally seconds), not instantly.
+- A subscribe-during-trial charge happens at trial end and arrives as a normal `subscription.charged` then; the earlier
+  `authenticated` event moves no money and creates no invoice.
+- **No credit notes.** A refunded subscription payment keeps its invoice; Indian GST expects a credit note for a refund. The app
+  has no refund flow for subscriptions yet, so this is parked with the other refund items.
+- The invoice is JSON only: no printable page/PDF, and no seller details (GSTIN, legal name, address) or buyer details. Both are 4.4
+  (the GSTIN is an owner input - see section A).
+- Scoped through the owner's CURRENT Subscription row: an independent teacher who later joins an institute no longer sees their
+  own old invoices (the old row is kept, there is just no screen for it).
+
+## Follow-up session: billing Phase 4.3 - upgrade now (prorated), migration 0017
+
+Backend only; the frontend is untouched (4.4). Adds an immediate, prorated plan upgrade that also
+works for UPI Autopay subscriptions. Tests: 72 pass on SQLite (58 old + 14 new); on PostgreSQL 16 70 of 72 pass
+(the same 2 pre-existing malformed-id 500s from 4.1); migration 0017 up/down/up and `alembic check` clean on PG 16;
+`tsc --noEmit` and `vite build` clean.
+
+### How it works (all rules live in `services/upgrades.py`)
+- `POST /billing/upgrade/quote {plan}` - read-only price. `POST /billing/upgrade {plan}` - creates a one-off **Razorpay
+  Order** for the prorated amount (receipt `upg_<hex>`, notes `kind=plan_upgrade`) and a `plan_upgrades` row (`pending`).
+  `POST /billing/upgrade/verify {order_id, payment_id, signature}` - the browser's confirmation after Checkout.
+  Billing managers only; create and verify are rate-limited like the other billing writes.
+- **Why an Order and not `subscription.edit`:** Razorpay refuses to edit UPI subscriptions (see the 4.0 heads-up), an Order
+  works for every payment method.
+- **Maths:** `base = (new_base - old_base) x remaining / period`, integer paise, rounded half-up once, on the BASE price;
+  GST is added on top afterwards (same rule as every invoice). The period start is derived (one cycle before
+  `current_period_end`, we only store the end). A quote under Razorpay's Rs 1 minimum is refused ("too close to renewal").
+- **Allowed only when:** active paid subscription, not `cancel_at_period_end`, no scheduled change, higher plan, SAME cycle,
+  target plan has a Razorpay plan id. Downgrades and cycle changes stay on `POST /billing/change-plan` (effective at renewal).
+- **Applying is idempotent.** The browser's verify and the payment webhook (`payment.captured` / `order.paid`, routed by
+  order id BEFORE the student-fee path) both call `upgrades.apply_paid` under a row lock; the row moves pending -> applied
+  once. Only a captured payment counts; verify re-fetches the payment from Razorpay and checks order id, status and amount.
+- **The paid plan is held:** after an upgrade Razorpay's subscription still reports the OLD plan_id, so
+  `subscriptions.held_plan()` keeps the upgraded plan while `current_period_end` still equals the upgrade's `period_end`.
+  When the period rolls over the hold releases and Razorpay's plan wins (tested both ways).
+- **Next renewal's price:** after the commit, `switch_renewal` tries `subscription.edit(plan_id=new, schedule_change_at="cycle_end")`.
+  If refused (UPI) it cancels the old subscription at cycle end and sets `cancel_at_period_end`; the customer then does an
+  ordinary `POST /billing/subscribe`, which starts the new subscription at the period end (no double charge). The outcome is
+  `plan_upgrades.renewal` = `scheduled` / `reauthorise` / `failed`, shown as `upgrade_renewal` on `GET /billing/me`. It never
+  raises (a webhook must still answer 200), runs once per upgrade, and a webhook redelivery retries it if it was missed.
+- **Invoice:** a `kind="proration"` invoice via `issue_invoice(total_paise=<amount actually paid>)`. NOTE: this differs from the
+  4.2 plan, which said `base_paise=`; passing the real charged amount keeps the invoice equal to the money that moved.
+  A failing invoice is logged (`INVOICE_NOT_ISSUED`) and never undoes a paid upgrade.
+
+### Money taken but the upgrade cannot be applied -> manual refund
+Status `refund_needed` + an ERROR log `UPGRADE_NEEDS_REFUND order=... payment=... - <reason>` when: the amount differs from the
+order, the period changed (renewed/ended) before the payment arrived, the plan is already at or above the target (two paid
+orders for one upgrade), or the subscription is gone. **An operator refunds that payment in the Razorpay dashboard by hand.**
+The customer is told so on verify (409). There is no refund button or alert yet.
+
+### Files
+New: `alembic/versions/0017_plan_upgrades.py` (pure addition, UNIQUE order and payment ids, CHECK total = base + GST),
+`app/services/upgrades.py`, `tests/test_migration_0017.py`. Changed: `models.py` (`PlanUpgrade`), `schemas.py` (upgrade schemas,
+`BillingStatus.upgrade_renewal`), `routers/billing.py`, `routers/payments.py` (webhook routing), `services/subscriptions.py`
+(`held_plan`), `README.md`, the 0015/0016 migration tests (drop the new table / no longer pin head to 0016), `tests/test_billing_flow.py`.
+
+### Known gaps (4.4 / 5)
+- No UI yet (4.4): quote dialog, Checkout call, a "subscribe again to continue" prompt when `upgrade_renewal == "reauthorise"`.
+- The EXISTING `change-plan` still uses `subscription.edit` and still returns 502 for UPI subscriptions (Phase 5).
+- A customer with a scheduled change cannot upgrade now until it takes effect (409).
+- No upgrade-now for a billing-cycle change.
+- Nothing has run against real Razorpay; the fake client mimics `order.create`, `payment.fetch` and `subscription.edit/cancel`.
+- Watch the logs for `UPGRADE_NEEDS_REFUND` and `UPGRADE_RENEWAL_NOT_SWITCHED` (renews at the OLD price - fix in the dashboard).
+
+---
+
+## Follow-up session: billing Phase 4.4 - billing UI (invoices, upgrade now, GST copy) + seller endpoint
+
+Mostly frontend. Tests: 73 pass on SQLite (72 + 1 new); `tsc --noEmit` and `vite build` clean. NOT run: PostgreSQL, a browser,
+real Razorpay, and no mutation-check of the new guard (one tiny endpoint). No UI has been seen rendered yet (Phase 5).
+
+### What changed
+- **Backend (small):** `GET /billing/seller` -> `{legal_name, gstin, address}` from new env `SELLER_LEGAL_NAME`, `SELLER_GSTIN`,
+  `SELLER_ADDRESS` (use `\n` for line breaks; empty until the owner sets them). Billing managers only, same as the invoices.
+  Files: `database.py` (settings), `schemas.py` (`SellerOut`), `routers/billing.py`, `.env.example`, one test.
+- **`api/client.ts`:** `Plan` gains the GST paise fields; `BillingStatus.upgrade_renewal`; types `Invoice`, `Seller`, `UpgradeQuote`,
+  `UpgradeOrder`; functions `listInvoices`, `getInvoice`, `getSeller`, `quoteUpgrade`, `startUpgrade`, `verifyUpgrade`.
+- **`lib/money.ts` (new):** `inrPaise` (integer paise -> "Rs 1,234.56", no float maths) and `fmtDate` (moved out of Billing.tsx).
+- **`pages/Billing.tsx`:** plan prices read "Rs X + GST / month (Rs Y with 18% GST)"; **Upgrade now** button (higher plan, SAME cycle as
+  the current one, no scheduled change) next to "Switch at next renewal" -> quote panel (credit, charge, subtotal, GST, total) ->
+  Razorpay Checkout on the one-off order -> `/billing/upgrade/verify`. A verify failure that is not the refund 409 is shown as "payment
+  received, plan updates within a minute" (the webhook applies it); the refund 409 is shown as an error. `upgrade_renewal ==
+  "reauthorise"` shows a "Subscribe again" card (reuses the normal subscribe flow); `"failed"` shows a short notice. New **Invoices** list
+  (managers only) with a "View / print" link.
+- **`pages/InvoicePage.tsx` (new), route `/billing/invoice/:invoiceId`:** printable tax invoice outside the Layout (like Receipt), with
+  seller name / GSTIN / address, base, GST, total.
+
+### Known gaps
+- The invoice shows GST as one line at the rate; no CGST/SGST/IGST split and no place of supply / HSN-SAC code (needs the owner's call).
+- The invoice list loads the first 50 (API default) with no paging UI.
+- Upgrade-now is offered only for the same cycle, as in 4.3. `change-plan` still 502s for UPI (Phase 5).
+- Still nothing has run against real Razorpay or in a browser.
+
+---
+
+## Follow-up session: hand-over prep - shipped WITHOUT Razorpay keys
+
+**Why:** the zip is going to a partner. Razorpay must not be connected, but everything else must work.
+
+### State of the zip
+- **No credentials anywhere.** Scanned the whole tree: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`,
+  `RAZORPAY_WEBHOOK_SECRET` and the 4 `RAZORPAY_PLAN_*` ids are empty in `.env.example`, no `.env` is included,
+  no `rzp_...` key appears in any source file. The Razorpay code is all still here; it just has no keys to use.
+- Removed `backend/smoke.db` (a local SQLite file) from the zip.
+
+### What changed (small, so the keyless app behaves properly)
+Found by running the app with the real Razorpay client and blank keys: nothing crashed, but (a) students and
+parents were still shown a **Pay now** button that then failed with "Couldn't start the payment", and (b) the
+`verify` endpoints would have accepted a signature forged with the EMPTY secret (an empty HMAC key is valid).
+Not exploitable in practice (no pending order can exist without keys) but wrong, so:
+- `services/razorpay_client.py`: `razorpay_configured()` and `require_razorpay()` (503 "Online payments aren't
+  switched on yet.").
+- Students/parents: `online_payment_available` is false without keys, so they see "Pay the teacher directly";
+  `create-order` answers the same friendly 409 as an institute with no payout account.
+- `POST /billing/subscribe`, `/billing/verify`, `/billing/upgrade`, `/billing/upgrade/verify`,
+  `/payments/verify`, `/parents/verify` return 503 without keys, before any signature check. The webhook already
+  refused without its secret.
+- Still working with no keys: login, batches, attendance, tests, plans listing, trial, fee records, **manual
+  (cash/UPI) payments and part-payments, receipts**, reminders.
+- `cancel` and `change-plan` are not guarded (an existing subscription cannot exist without having had keys).
+
+### To connect Razorpay later
+Put the keys, webhook secret and 4 plan ids in the real `backend/.env` (never in git) - no code change. Then work
+through section B and Phase 5 below. The startup log warns if keys are set with commission 0.
+
+### Verified
+- `python -m tests.test_billing_flow`: **74 pass on SQLite** (73 + 1 new). The new test blanks the keys and checks
+  all of the above, including that no call reaches Razorpay and that forged-empty-secret signatures are refused.
+  It also passes on **PostgreSQL 16**. Mutation-checked: removing the key check in my-fees, create-order,
+  payments-verify, subscribe and billing-verify each made it fail (the two upgrade endpoints' guards are not
+  individually mutation-tested).
+- Migration tests 0015/0016/0017 pass. Frontend not touched this session (previous `tsc` and `vite build` were clean).
+- PostgreSQL, whole suite (earlier this session, before this change): 71 of 73; the 2 failures are the known
+  malformed-id 500s listed under Phase 5. Empty-Postgres `alembic upgrade head` still fails at 0001
+  (`type "classstatus" already exists`) - re-confirmed.
+- Also still open and re-confirmed: CORS is `allow_origins=["*"]` in `main.py` (tighten before a public deploy).
+
+---
+
+## WHAT TO DO NEXT (billing) - last updated after Phase 4.4
+
+Billing work is split into 5 phases. Each ends with tests, `tsc`, `vite build` and a HANDOFF entry.
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1 | Harden: rate limits, gate Free-plan reminders, commission warning | DONE |
+| 2 | Parents can pay their child's fees | DONE |
+| 3 | Fee lifecycle: ledger, partial payments, receipts, refund webhook, fee-created + receipt notices | DONE |
+| 4.0 | Cheap fixes: rate-limit verify endpoints, reminder amount variable | DONE |
+| 4.1 | GST + invoice table, migration 0016, numbering, "+ GST" in plan catalog | DONE |
+| 4.2 | Invoices created from the `subscription.charged` webhook + invoice list/detail API | DONE |
+| 4.3 | Upgrade-now with proration (backend, works for UPI; charge becomes a `kind="proration"` invoice), migration 0017 | DONE |
+| 4.4 | Billing UI: invoice list/detail (+ printable page, seller GSTIN), upgrade-now dialog (quote -> Checkout -> verify, "subscribe again" prompt for `upgrade_renewal == "reauthorise"`), "+ GST" copy; `client.ts` types/functions added; plus `GET /billing/seller` | DONE |
+| 5 | Go live: fix migration chain, real Razorpay test-mode run, Postgres, browser check | **NEXT** |
+
+### A. Decisions only the owner can make (blocking or money-affecting)
+1. **Platform commission** (`FEE_PLATFORM_COMMISSION_BPS`, currently 0). At 0 every online fee payment
+   costs you Razorpay's fee. Choose a % covering Razorpay's fee + GST on it before enabling online fees.
+2. ~~GST on subscriptions~~ DECIDED in 4.0: added on top, 18%. **Still yours:** Pro yearly now totals Rs 17,688.20, above
+   the Rs 15,000 UPI Autopay no-PIN limit - lower its base to <= Rs 12,711 or accept a PIN each year (see the 4.1 entry).
+   Also needed for a valid tax invoice: set `SELLER_LEGAL_NAME`, `SELLER_GSTIN`, `SELLER_ADDRESS` in env (4.4 prints them on the invoice page).
+
+### B. Setup outside the code (the app will not fully work until these are done)
+3. Razorpay webhook: tick **`refund.processed`** (new in Phase 3) in addition to the existing events.
+4. Meta Business Manager: create and get approved `fee_created` and `payment_receipt` WhatsApp
+   templates (4 body variables each; exact order in the Phase 3 entry). Until then notices go by SMS.
+5. Route: each institute/teacher still needs a KYC'd linked account set by hand (`set_payout_account`).
+   There is no self-serve onboarding.
+6. Real prices and limits in `plans.py` (BASE prices, excluding GST); create the 4 Razorpay Plans at **base + GST** (exact
+   paise in `GET /billing/plans` -> `total_*_paise`) and paste their ids into env.
+
+### C. Phase 4 - subscription completeness (next)
+7. ~~Upgrade now with proration~~ API DONE in 4.3 (`/billing/upgrade/quote|upgrade|upgrade/verify`); the dialog is DONE in 4.4.
+8. ~~Invoice list~~ API DONE in 4.2 (`GET /billing/invoices`); the screen is DONE in 4.4.
+9. ~~GST on invoices~~ - DONE in 4.1 (table, numbering, maths) + 4.2 (rows from the webhook); shown in 4.4.
+Likely files for 4.4: `webapp/src/pages/Billing.tsx`, `webapp/src/api/client.ts`.
+Add tests to `tests/test_billing_flow.py`, mutation-check each rule, then append a HANDOFF entry.
+
+### D. Phase 5 - go-live verification (nothing below has ever been done against real services)
+10. **Fix the migration chain on an empty PostgreSQL** (fails at 0001 and 0005 - see the WARNING above).
+    Not needed for an existing DB at 0012+.
+11. **Run the whole suite on PostgreSQL**: `TEST_DATABASE_URL=postgresql+psycopg://... python -m tests.test_billing_flow`.
+    Phases 1-3 were only run on SQLite. **4.1 ran the full suite on PG 16.2: all pass except 2 pre-existing
+    malformed-id 500s (see the 4.1 entry) - fix those here.** Postgres-specific risks: `with_for_update` row locks in the
+    payment/refund path, UUID comparisons, migration 0015 backfill.
+12. **Real Razorpay test-mode run**: subscribe, webhook delivery, Route transfer on a fee payment,
+    Checkout popup (student and parent, with and without an amount), a real refund -> `refund.processed`.
+13. **Click through the UI in a browser**: Pay with amount box, receipt page + print, teacher
+    "Record payment", Billing page. No UI has been seen rendered in any session so far.
+14. Real WhatsApp/SMS send of a fee-created and a receipt notice once templates are approved.
+
+### E. Smaller known gaps (do when convenient)
+- ~~verify endpoints unlimited~~ DONE in 4.0. Login/OTP and the rest of the app still have no rate limit.
+- Daily overdue reminder: code now supports a variables template (4.0) but defaults to the old one. Create
+  the Meta template and flip `FEE_REMINDER_TEMPLATE` / `FEE_REMINDER_TEMPLATE_VARS` (see the 4.0 entry).
+- Refunds can only be issued from the Razorpay dashboard; there is no refund button in the app.
+- Teacher "Record payment" is a plain browser prompt box.
+- Two payers racing partial orders can overpay (flagged, not prevented).
+- Abandoned (pending) ledger rows accumulate; harmless, could be pruned.
+- A teacher who joins an institute keeps an old Subscription row. (The platform-admin panel now exists; see the 2026-10-25 entry.)
+- ~~Malformed ids give 500 on Postgres~~ DONE (DataError -> 404, QA fix pass).
+- Charges made before migration 0016 have no invoice; decide whether to backfill (needs the real payment amounts from Razorpay).
+- Watch the logs for `INVOICE_NOT_ISSUED` / `INVOICE_AMOUNT_MISMATCH` (4.2) and `UPGRADE_NEEDS_REFUND` / `UPGRADE_RENEWAL_NOT_SWITCHED` (4.3, needs a manual refund / dashboard fix); there is no alert on them yet.
+
+- (2026-10-25) Platform admin: see "Still open" in that entry (admin ban date not shown in rows, stats load all subscriptions in Python, no payment-reminder messages before the ban).
+
+### F. Rules for whoever continues
+- Fee paid/unpaid state changes ONLY through `services/fee_ledger.py`. Never set `FeeRecord.amount_paid /
+  is_paid / paid_at` elsewhere.
+- Tests: `python -m tests.test_billing_flow` (74 pass) and `python -m pytest tests/test_fixes.py` (11 pass), `python -m tests.test_migration_0015`, `..._0016`, `..._0017`.
+  Platform admin / lifecycle (2026-10-25): `python -m pytest tests/test_access.py tests/test_admin.py tests/test_migration_0019.py`. Full suite is now `pytest tests` (133 pass). The 0015/0016/0017 migration tests upgrade to 0018, not head (they build the DB from current models, so head would re-create the 0019 tables).
+  Run with `timeout` and mutate one guard at a time (a long all-in-one mutation run once timed out and
+  left a broken guard in the source - always confirm originals are restored).
+- Append a new `## Follow-up session:` entry per change; update this section's table and lists.
+- Invoices: only create them through `services/invoices.py` (`issue_invoice` / `issue_for_charge` - numbering + idempotency live
+  there), pass the real charged amount as `total_paise=`, never edit an invoice once issued. Never let invoicing raise out of the
+  webhook (see `_issue_charge_invoice`).
+
+## Follow-up session: Claude (sandbox QA + fix pass, 2026-10-20)
+
+**Asked:** full sandbox QA of the teacher, student, parent and institute-owner windows (real browser, Asia/Kolkata, SQLite + Postgres 16), then fix what was found. Findings are in the QA report that came with this zip.
+
+**What changed (backend, `backend/app/`)**
+- **Timezones:** new `timeutil.py` (`utcnow`, `fmt_local`, `DISPLAY_TIMEZONE`, default Asia/Kolkata). `schemas.py` has `UtcIn` (aware -> naive UTC) and `UtcOut` (serialised with trailing `Z`). Class/attendance/attempt times use them; WhatsApp/SMS text is formatted in local time. Fee `due_date` stays date-only on purpose.
+- **Classes:** end must be after start; cancel rejects already cancelled/completed; reschedule only for effective-scheduled; `effective_status` marks past scheduled classes `completed`; new `GET /classes/my` for students.
+- **Attendance:** rejects cancelled / not-yet-started classes and students outside the batch; dedupes; empty marks 422; summary ignores cancelled classes.
+- **Tests:** `/start` uses `_visible_test_for` (tenant + batch); resumes an open attempt; `TEST_MAX_ATTEMPTS` (default 1 -> 409); server timer (`duration + TEST_SUBMIT_GRACE_SECONDS`, `seconds_left` in payload); answers deduped by `question_id`; new `GET /tests/my-attempts`; analytics counts skipped questions; test document URL must be `/uploads/..` or http(s); magic-byte check on uploads.
+- **Auth:** phone normalisation (`Phone` type); student/parent login checks every phone match against the secret and returns 409 `{choices:[{student_id,label}]}` when several match (client retries with `student_id`); login endpoints rate-limited (`RATE_LIMIT_LOGIN_PER_MIN`, default 10).
+- **Deletes:** `services/cleanup.py` (`delete_student` refuses if any paid payment exists, else removes fees/attendance/attempts; `detach_teacher`). `main.py` turns Postgres `DataError` (malformed ids) into 404.
+- **Owner tooling:** `GET/POST /institute/batches`, `DELETE /institute/students/{id}`; a teacher may add students to batches they created.
+- **Migrations:** 0001 enums `create_type=False`; 0005 UUID types; new `0018_align_id_columns_to_uuid` (Postgres-only, idempotent). `alembic upgrade head` now works on an empty Postgres and `alembic check` shows no drift.
+
+**What changed (webapp, `webapp/src/`)**: `api/client.ts` (exports `BASE_URL`, `toLocalInput`, `resolveApiUrl`, `AccountChoiceError`, new endpoints); Student/Parent login account picker + 429 message; ScheduleClass (local-time prefill, required fields, end>start, error text); MarkAttendance (hides cancelled/future classes, shows save errors); TakeTest (countdown + auto-submit, doc URL resolved against API, "awaiting grading", start/submit errors); StudentHome (Classes + My results); ManageStudents (Delete, Reset PIN); InstituteDashboard (owner checkbox, batches, per-teacher batch assignment, errors); new `InstituteStudents` page at `/institute/students` + enabled Students tab.
+
+**Verified:** `tests/test_fixes.py` (11 new) + billing suite: 87/87 on SQLite, 85/85 on Postgres (`TEST_DATABASE_URL`, fixes+billing). `npx tsc --noEmit` clean, `npm run build` ok. Real browser (Chromium, IST): owner created batch, teacher (with batch) and student from the UI; teacher typed 16:00 -> shows 16:00 (DB 10:30 UTC), reschedule-confirm without edits no longer drifts; student sees class + countdown + score + results history, retake blocked.
+
+**Behaviour changes to know about:** one attempt per test by default (set `TEST_MAX_ATTEMPTS`); login phones are stored/compared as digits only - rows created earlier with `+91`/spaces may need a one-off clean-up; cancelling a past class is now an error.
+
+**Still open:** batch rename/delete and delete-test UI; password-reset still picks the first student on a shared phone (`_lookup_account`); notifications still sent sequentially; Razorpay, WhatsApp/Twilio, Android lock plugin and the fee-reminder cron untested; owner "Analytics" tab still disabled.
+
+## Follow-up session: Claude (platform admin + account lifecycle, 2026-10-25)
+
+**Asked:** a founder-only platform admin panel (two logins, not linked from the app) with headline numbers and per-account controls, plus an automatic account lifecycle that limits and then bans accounts that stop paying. Spec: `docs/superpowers/specs/2026-10-20-platform-admin-design.md`, plan: `docs/superpowers/plans/2026-10-21-platform-admin.md`.
+
+**Lifecycle (`backend/app/services/access.py`).** A trial/paid plan runs to its period end, then a **3-day buffer** (still fully active), then **15 days of limited grace** (`LIMITED_GRACE_DAYS`; logins work, but attendance marking/analytics, creating tests, starting a NEW test attempt and test analytics are refused with 402; an already open attempt can still be resumed and submitted), then **ban** (403 on every authenticated route of that account and everyone under it; payers can still reach Billing). A payment restores access. A **manual (admin) ban** is separate: it is not lifted by payment, only by "Lift ban". Free-tier / never-paid accounts get their clock from the enforcement start date.
+
+**ENFORCEMENT_START (safe default).** `ENFORCEMENT_START` in `backend/.env` (ISO date = midnight UTC). Blank/unset = enforcement disabled: nothing changes for any account. When set, the lifecycle clock for any lapsed account is `max(period end, ENFORCEMENT_START)`, so accounts already unpaid/on free at release get the 3-day buffer, then 15 days grace, ban 18 days after the release date.
+
+**What changed, per task**
+- **T1 schema (migration 0019, `models.py`, `database.py`):** tables `platform_admins`, `admin_audit_log`; `subscriptions.grace_until / admin_banned / admin_ban_reason / admin_banned_at`; `created_at` on teachers and students; settings `enforcement_start`, `limited_grace_days`. Test `tests/test_migration_0019.py`. Migration tests 0015/0016/0017 now upgrade to 0018 instead of head (accepted deviation, see above).
+- **T2 access rules (`services/access.py`):** `access_for_owner/access_for_subscription` -> `Access(state, reason, grace_starts_at, ban_at)`; `assert_not_locked(db, owner, *, billing=False, payer=False)`, `assert_full_access(db, owner, what)`. `plan_for_owner` hooks in. 12 tests in `tests/test_access.py`.
+- **T3 enforcement (`auth.py`, `main.py`, routers attendance/tests/billing):** lock checks in the teacher, student, parent and institute-admin dependencies; grace guards on the endpoints listed above; `BillingStatus` gains `access_state`, `access_reason`, `ban_at`; CORS exposes `X-Account-Status` and `X-Account-Can-Pay`.
+- **T4 admin identity (`routers/admin.py`, `auth.get_current_platform_admin`, `scripts/create_platform_admin.py`):** `POST /admin/login` (own token role `platform_admin`, rate limited); admin tokens are rejected by every other route and vice versa.
+- **T5 admin API (`routers/admin.py`, `timeutil.month_start_utc`):** `GET /admin/stats`, `GET /admin/accounts?status=`, `POST /admin/accounts/{id}/extend-grace | ban | lift-ban`; every mutation writes one `admin_audit_log` row.
+- **T6 frontend:** `/admin-login`, `/admin` (stats tiles + account table with extend/ban/lift), `/account-locked`, `AccessBanner` in Layout, axios interceptor for the lock headers.
+- **T7:** small polish fix commit (a platform_admin at `/` is sent to `/admin`; AdminDashboard clears a stale error on refresh; AdminLogin shows API `detail`, "Wrong phone number or password" only on 401, "Could not reach the server. Try again." with no response), plus these docs.
+
+**Rulings made during the build**
+- R1: payment-ban response carries `X-Account-Status: banned_payment`; `X-Account-Can-Pay: 1` only for payers (institute admin, independent teacher). Payer message "Your plan wasn't renewed. Renew in Billing to restore access."; others "This account is inactive because the plan wasn't renewed. Please contact your institute." Admin ban: `banned_admin`, "This account has been suspended. Please contact Wandor support.", never Can-Pay. The lock screen shows the Billing link only when Can-Pay was seen.
+- R2: only institute admins and independent teachers get Billing during a payment-ban; teachers inside an institute are locked from Billing too.
+- R3: `create_platform_admin` normalises the phone (`schemas.normalize_phone`) so login matches; the script is an idempotent upsert.
+- R4: `grace_starts_at` and `ban_at` are set whenever the account has lapsed, including during the 3-day buffer (state still "active"); both None when not lapsed.
+- R5: commit trailer convention.
+- T3: `/tests/{id}/start` blocks only NEW attempts in grace; resuming an open in-time attempt still works (submit alone is useless without the questions).
+- T5: the account list keeps free-tier rows and expired trials (founders must be able to extend/ban the accounts that sit in grace/ban after release); `is_paying` on each row and the stats headline share `_is_paying()`. Manual ban is allowed for any independent teacher or institute owner (not only paid plans); students, parents and in-institute teachers are not reachable (ids are subscription ids, unknown -> 404).
+
+**Founder-facing facts:** parents are not counted in "Gained this week" (footnote on the dashboard). Teachers and students that existed before migration 0019 have no signup date (`created_at` NULL), so they never count as "gained"; only accounts created after the migration do. Money tiles are IST-month based (`month_start_utc`).
+
+**Verified (2026-10-25):** full backend suite 130 passed on SQLite and 130 passed on Postgres 16 (fresh db each); `alembic upgrade head` on an empty Postgres runs 0018 -> 0019 with no error, `alembic current` = 0019 (head), `alembic check` = "No new upgrade operations detected."; `npx tsc --noEmit` and `npm run build` clean. Browser (Playwright, IST, SQLite) in Task 6: admin login, tiles matched seeded invoices, extend grace, manual ban + lift, payment-ban lock screen with Billing link, grace banner. NOT browser-tested: the non-payer locked variant (institute teacher under payment-ban), and the T7 polish fixes (typecheck/build only).
+
+**Still open (deferred minors)**
+- No test of `plan_for_owner` outside grace (active paid / banned fall-through).
+- No HTTP test for an institute student in grace or an ownerless student; student/parent requests cost one extra subscription query.
+- No test showing `/admin/login` rate limiting; admin login skips `verify_password` for an unknown phone (same as the other logins) - timing difference.
+- `admin_banned_at` is not exposed in account rows; admin-banned rows have `ban_at` null (UI shows "-"); `extend_grace` audit old value is the effective ban date.
+- `/admin/stats` and `/admin/accounts` load all subscriptions into Python (access state is date logic); fine now, will not scale.
+- pydantic 422s return a list `detail` (app-wide behaviour).
+- Task 1 minors: `test_migration_0019` upgrades to head but asserts 0019 (pin it to 0019); brittle 'NUMERIC(), UUID' string match; stale comment in the 0016 test; env leak via `setdefault`.
+- `AccessBanner` refetches `/billing/me` per Layout mount. `alembic check` on SQLite is never clean (UUIDs reflect as NUMERIC, pre-existing); use the Postgres check.
+- No reminder messages are sent before the buffer/grace/ban dates; the lifecycle is silent apart from the in-app banner.
+- A subscription with status expired/pending restarts its lapse clock at the release date.
+- A free-tier account in grace gets pro limits (`TRIAL_PLAN`).
+- The Billing page shows the "Free" label for a paying account in grace (`billing.py` uses `effective_plan`).
+- Spec says "15-day grace starting release day"; the build is 3-day buffer + 15 days (ban at release + 18 days). Confirm with the founders.
+- Admin list/stats load all subscriptions in Python.
+- Admin login does no hash check for an unknown phone (timing).
+- `tests/test_migration_0019.py` asserts head == 0019 and will break when 0020 lands.
+
+**Added in the fix wave (2026-10-25, after review)**
+- Accounts with no Subscription row were invisible to the admin panel but still banned by the lifecycle. Migration 0019 now backfills a `plan='free', status='active'` row for every institute and every independent teacher lacking one (idempotent; downgrade keeps them), and `subscriptions.start_trial` always leaves a row (free/active when `TRIAL_DAYS=0`; never restarts a trial). Tests: `test_migration_0019.py`, `test_access.py::test_start_trial_always_leaves_a_row`, `test_admin.py::test_account_without_prior_row_...`.
+- `apply_razorpay_subscription` clears `grace_until` when the result is active with a future period end (a founder extension no longer outlives the payment; `admin_banned` untouched).
+- README release checklist order fixed (migrate before creating founder logins).
+
+## Frontend redesign (Neo-Constructivist)
+- New public landing at `/` for logged-out visitors (`pages/Landing.tsx`, `landing.css`, scoped under `.lp`). Role picker moved to `/enter` (`RoleSelect.tsx`; Student and Parent are now separate rows).
+- App-wide tokens re-skinned in `index.css` (ivory #F2EFE6, ink #111, red #D62828, Archivo variable width). Fonts are self-hosted via @fontsource (works offline in Capacitor). Google Fonts link removed.
+- Landing ignores dark mode on purpose. Inner pages (27) were only re-skinned through tokens, not redesigned.

@@ -78,7 +78,7 @@ Then:
 - Attendance-based dropout-risk flagging, fee-reminder scheduler, rank/percentile,
   adaptive difficulty — planned as deterministic rule-based engines, not LLM calls
 - Multi-tenant white-label branding config
-- Parent-specific read-only login role (student login exists; parent role does not yet)
+- (Parent login now exists: a parent signs in with the child's phone + parent PIN, sees fees/attendance/results and can pay fees. See HANDOFF.md.)
 - Tier-2 device-owner/MDM lock (current lock is screen-pinning, exitable via a
   long-press gesture that gets logged — be upfront with institutes that this is
   "flags attempted cheating," not "physically impossible to cheat," unless you
@@ -102,3 +102,36 @@ cd webapp
 npm install
 npm run dev   # http://localhost:5173
 ```
+
+## Billing and fee payments
+
+Subscriptions (what institutes/teachers pay Wandor), online fee payment by students and parents
+(Razorpay Route), part-payments, receipts, refund handling and fee notices are built. Status, setup
+steps, open decisions and the remaining phases are in **HANDOFF.md -> "WHAT TO DO NEXT (billing)"**.
+Backend tests (run from `backend/`): `python -m tests.test_billing_flow`, `python -m tests.test_migration_0015`, `python -m tests.test_migration_0016` and `python -m tests.test_migration_0017`.
+
+Subscription prices in `backend/app/plans.py` are **base prices excluding GST**; GST (`GST_RATE_BPS`, 18% default) is added on top. Create each Razorpay Plan at base + GST - `GET /billing/plans` returns the exact paise to use.
+
+Every successful subscription charge (Razorpay `subscription.charged` webhook) becomes a numbered tax invoice (`WND/2627/000001`); the account's billing manager lists them with `GET /billing/invoices` and opens one with `GET /billing/invoices/{id}`.
+
+**Upgrade now (prorated).** An active paid subscription can move to a higher plan immediately and pay only for the rest of the current period: `POST /billing/upgrade/quote` (read-only price), `POST /billing/upgrade` (creates a one-off Razorpay Order), Checkout in the browser, then `POST /billing/upgrade/verify` (the payment webhook applies it too). Proration runs on the base price, GST is added on top, and the charge becomes a `kind="proration"` invoice. It uses an Order rather than Razorpay's subscription-update API, so it also works for UPI Autopay subscriptions. Only upgrades on the same billing cycle; downgrades and cycle changes stay on `POST /billing/change-plan` (effective at renewal). Rules and failure modes: `backend/app/services/upgrades.py` and HANDOFF.md, Phase 4.3.
+
+**Billing UI (4.4).** The Billing page shows prices as base + GST, an "Upgrade now" panel (quote -> Checkout -> verify), a "subscribe again" card when an upgrade needs re-authorising, and an Invoices list with a printable page at `/billing/invoice/:id`. Set `SELLER_LEGAL_NAME`, `SELLER_GSTIN` and `SELLER_ADDRESS` in `backend/.env` so invoices carry the seller details.
+
+**This copy ships without Razorpay credentials.** Online payment features are off until you add
+`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` (and plan ids) to `backend/.env`. Everything
+else, including recording cash/UPI payments by hand, works without them. See HANDOFF.md.
+
+## Platform admin
+
+A founder-only panel at **`/admin-login`** (not linked from anywhere in the app) shows paying/total/gained numbers, revenue, and every account with controls to extend grace, ban and lift a ban. It also drives the account lifecycle: paid/trial period ends -> 3-day buffer -> 15 days of limited grace (no attendance marking, test creation, new test attempts or analytics) -> ban. A payment restores access; a manual ban is separate and is not lifted by payment. Details: HANDOFF.md, "platform admin + account lifecycle".
+
+**Release checklist** (in this order; the founder script needs the tables from migration 0019)
+1. Deploy the backend and webapp.
+2. `cd backend && alembic upgrade head` (migration 0019 creates `platform_admins`, so this must come before step 3).
+3. Create both founder logins: `cd backend && python -m scripts.create_platform_admin <phone> <password>` (run once per founder; re-running updates the password).
+4. Set `ENFORCEMENT_START` in `backend/.env` to the release date (UTC, e.g. `2026-11-01`) and restart. Until it is set, nothing changes for any account.
+
+**What happens at that date:** accounts already unpaid or on the free tier get a 3-day buffer from `ENFORCEMENT_START`, then 15 days of limited grace, and are banned 18 days after the release date unless they pay (or a founder extends their grace).
+
+With `TRIAL_DAYS=0` a brand-new account has no trial (it gets a free/active row) and, once enforcement is on and `ENFORCEMENT_START` + 18 days has passed, is banned until it subscribes.

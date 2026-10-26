@@ -1,24 +1,50 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { instituteSignup } from '../api/client';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { instituteSignup, verifyInstituteSignup } from '../api/client';
 
 // Replaces the old manual DB-insert + scripts/set_institute_password.py bootstrap -
-// this creates the Institute row and activates its login password in one step.
+// this creates the Institute row, but (like TeacherSignup) doesn't activate login
+// until the OTP sent here is confirmed. See TeacherSignup.tsx for the `verify=1`
+// skip-to-code-step behavior when InstituteLogin.tsx redirects here after a "phone
+// not verified" 403.
 export default function InstituteSignup() {
+  const [searchParams] = useSearchParams();
+  const skipToVerify = searchParams.get('verify') === '1';
+
+  const [step, setStep] = useState<'form' | 'verify'>(skipToVerify ? 'verify' : 'form');
   const [name, setName] = useState('');
-  const [ownerPhone, setOwnerPhone] = useState('');
+  const [ownerPhone, setOwnerPhone] = useState(searchParams.get('phone') || '');
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [info, setInfo] = useState(skipToVerify ? "We've sent a new code to this phone." : '');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
+    setError(''); setLoading(true);
     try {
-      await instituteSignup(name, ownerPhone, password);
-      navigate('/institute');
+      const res = await instituteSignup(name, ownerPhone, password);
+      setInfo(res.message);
+      setStep('verify');
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Could not sign up');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleVerify(e: React.FormEvent) {
+    e.preventDefault();
+    setError(''); setLoading(true);
+    try {
+      await verifyInstituteSignup(ownerPhone, code);
+      navigate('/institute');
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Incorrect or expired code');
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -29,13 +55,32 @@ export default function InstituteSignup() {
         <span className="brand-word" style={{ fontSize: 26 }}>Wandor</span>
       </div>
       <p>Institute sign up</p>
-      <form onSubmit={handleSubmit} className="card stack">
-        <input placeholder="Institute name" value={name} onChange={(e) => setName(e.target.value)} />
-        <input placeholder="Owner phone" value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} />
-        <input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        {error && <p className="error">{error}</p>}
-        <button type="submit">Sign up</button>
-      </form>
+
+      {step === 'form' && (
+        <form onSubmit={handleSignup} className="card stack">
+          <input placeholder="Institute name" value={name} onChange={(e) => setName(e.target.value)} required />
+          <input placeholder="Owner phone" value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} required />
+          <input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          {error && <p className="error">{error}</p>}
+          <button type="submit" disabled={loading}>{loading ? 'Sending code…' : 'Sign up'}</button>
+        </form>
+      )}
+
+      {step === 'verify' && (
+        <form onSubmit={handleVerify} className="card stack">
+          {info && <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>{info}</p>}
+          <div>
+            <label>6-digit code sent to {ownerPhone}</label>
+            <input
+              placeholder="123456" value={code} maxLength={6}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} required
+            />
+          </div>
+          {error && <p className="error">{error}</p>}
+          <button type="submit" disabled={loading}>{loading ? 'Verifying…' : 'Verify & activate'}</button>
+        </form>
+      )}
+
       <p className="hstack" style={{ justifyContent: 'center', marginTop: 16 }}>
         <Link to="/institute-login">Already have an account? Log in</Link>
       </p>

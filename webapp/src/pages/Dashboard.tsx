@@ -5,7 +5,8 @@ import Layout from '../components/Layout';
 
 interface ClassSession {
   id: string;
-  batch: string;
+  batch_id: string;
+  batch_name: string;
   subject: string;
   start_time: string;
   status: string;
@@ -40,7 +41,7 @@ export default function Dashboard() {
           .map((c) => (
             <div className="card row" key={c.id}>
               <div>
-                <div>{c.subject} — {c.batch}</div>
+                <div>{c.subject} — {c.batch_name}</div>
                 <p style={{ margin: '2px 0 0' }}>{new Date(c.start_time).toLocaleString()}</p>
               </div>
               <div className="hstack">
